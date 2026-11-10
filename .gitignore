@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# reports produced while developing
+*.report.html
+*.report.json
+
+# private logs never go in the repo
+private-logs/
+
+node_modules/
+.DS_Store
+
+# downloaded public logs for local testing
+testdata/real/
+
+# local data folder (flightlens serve)
+data/
+web/dist/
+*.tsbuildinfo

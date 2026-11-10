@@ -1,0 +1,63 @@
+[project]
+name = "flightlens"
+version = "0.1.0"
+description = "Automatic drone flight log analysis: a health verdict, ranked findings and the evidence behind them."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=1.26",
+    "typer>=0.12",
+    "rich>=13.7",
+    "pyyaml>=6.0",
+    "pyulog>=1.3.0",
+    "pyarrow>=26.0.1",
+    "jinja2>=3.1.6",
+    "fastapi>=0.162.2",
+    "uvicorn>=0.54.0",
+    "python-multipart>=0.0.33",
+]
+
+[project.scripts]
+flightlens = "flightlens.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "types-PyYAML",
+    "httpx>=0.28.1",
+    "playwright>=1.65.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/flightlens"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "N"]
+ignore = [
+    "RUF001", # en dashes and unit symbols in user-facing text are intentional
+    "RUF012", # checks declare `defaults` as plain class attributes by design
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src"]
+
+[[tool.mypy.overrides]]
+module = ["pyulog", "pyulog.*", "pyarrow", "pyarrow.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

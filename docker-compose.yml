@@ -1,0 +1,16 @@
+services:
+  flightlens:
+    build: .
+    image: flightlens:local
+    # Only this computer can reach it. To share on your LAN, use "8000:8000"
+    # and set FLIGHTLENS_ALLOWED_HOSTS to the name or IP others will type.
+    ports:
+      - "127.0.0.1:8000:8000"
+    # environment:
+    #   FLIGHTLENS_ALLOWED_HOSTS: "192.168.1.20"
+    volumes:
+      - flightlens-data:/data
+    restart: unless-stopped
+
+volumes:
+  flightlens-data:

@@ -1,0 +1,201 @@
+# PX4 ULog -> FlightLens common signal vocabulary.
+#
+# Each signal lists one or more sources, tried in order; the first source whose
+# topic and field exist in the log is used. Older firmware field names are
+# listed as later alternatives. Bump `version` whenever a mapping changes, so
+# reports stay traceable.
+#
+# Source options:
+#   topic, field          uORB topic and field name
+#   instance              topic multi-instance (default 0)
+#   scale                 multiply raw values (unit conversion)
+#   min_valid/max_valid   values outside this range become missing (NaN)
+#   zero_is_missing       0 means "no sensor" for this field
+#
+# Signals that need computation (attitude angles from quaternions, motors,
+# vibration across IMUs, arming segments, events) are built in ulog.py.
+
+version: "px4-2026.11.2"
+
+signals:
+  # Battery
+  - name: bat.volt
+    unit: V
+    sources:
+      - { topic: battery_status, field: voltage_v, zero_is_missing: true }
+  - name: bat.curr
+    unit: A
+    sources:
+      - { topic: battery_status, field: current_a, min_valid: 0 }
+  - name: bat.used_mah
+    unit: mAh
+    sources:
+      - { topic: battery_status, field: discharged_mah, min_valid: 0 }
+  - name: bat.cells
+    unit: count
+    sources:
+      - { topic: battery_status, field: cell_count, zero_is_missing: true }
+  - name: bat.remaining
+    unit: fraction
+    sources:
+      - { topic: battery_status, field: remaining, min_valid: 0, max_valid: 1 }
+
+  # GNSS receiver
+  - name: gps.lat
+    unit: deg
+    sources:
+      - { topic: vehicle_gps_position, field: latitude_deg, zero_is_missing: true }
+      - { topic: vehicle_gps_position, field: lat, scale: 1.0e-7, zero_is_missing: true }
+      - { topic: sensor_gps, field: latitude_deg, zero_is_missing: true }
+  - name: gps.lon
+    unit: deg
+    sources:
+      - { topic: vehicle_gps_position, field: longitude_deg, zero_is_missing: true }
+      - { topic: vehicle_gps_position, field: lon, scale: 1.0e-7, zero_is_missing: true }
+      - { topic: sensor_gps, field: longitude_deg, zero_is_missing: true }
+  - name: gps.alt
+    unit: m
+    sources:
+      - { topic: vehicle_gps_position, field: altitude_msl_m }
+      - { topic: vehicle_gps_position, field: alt, scale: 1.0e-3 }
+  - name: gps.nsats
+    unit: count
+    sources:
+      - { topic: vehicle_gps_position, field: satellites_used }
+      - { topic: sensor_gps, field: satellites_used }
+  - name: gps.hdop
+    unit: ""
+    sources:
+      - { topic: vehicle_gps_position, field: hdop, min_valid: 0, max_valid: 99 }
+      - { topic: sensor_gps, field: hdop, min_valid: 0, max_valid: 99 }
+  - name: gps.fix
+    unit: fix type
+    sources:
+      - { topic: vehicle_gps_position, field: fix_type }
+      - { topic: sensor_gps, field: fix_type }
+  - name: gps.eph
+    unit: m
+    sources:
+      - { topic: vehicle_gps_position, field: eph }
+  - name: gps.speed
+    unit: m/s
+    sources:
+      - { topic: vehicle_gps_position, field: vel_m_s }
+
+  # Estimated position (EKF output), used for the map and flight summary
+  - name: pos.lat
+    unit: deg
+    sources:
+      - { topic: vehicle_global_position, field: lat, zero_is_missing: true }
+  - name: pos.lon
+    unit: deg
+    sources:
+      - { topic: vehicle_global_position, field: lon, zero_is_missing: true }
+  - name: pos.alt
+    unit: m AMSL
+    sources:
+      - { topic: vehicle_global_position, field: alt }
+  - name: pos.rel_alt
+    unit: m
+    sources:
+      - { topic: vehicle_local_position, field: z, scale: -1.0 }
+  - name: pos.climb
+    unit: m/s
+    sources:
+      - { topic: vehicle_local_position, field: vz, scale: -1.0 }
+  - name: pos.vx
+    unit: m/s
+    sources:
+      - { topic: vehicle_local_position, field: vx }
+  - name: pos.vy
+    unit: m/s
+    sources:
+      - { topic: vehicle_local_position, field: vy }
+
+  # Estimator innovation test ratios (> 1 means the measurement was rejected)
+  - name: ekf.vel
+    unit: ratio
+    sources:
+      - { topic: estimator_status, field: vel_test_ratio, min_valid: 0 }
+  - name: ekf.pos
+    unit: ratio
+    sources:
+      - { topic: estimator_status, field: pos_test_ratio, min_valid: 0 }
+  - name: ekf.hgt
+    unit: ratio
+    sources:
+      - { topic: estimator_status, field: hgt_test_ratio, min_valid: 0 }
+  - name: ekf.mag
+    unit: ratio
+    sources:
+      - { topic: estimator_status, field: hdg_test_ratio, min_valid: 0 }
+      - { topic: estimator_status, field: mag_test_ratio, min_valid: 0 }
+
+  # Angular rates, measured and commanded
+  - name: rate.roll
+    unit: deg/s
+    sources:
+      - { topic: vehicle_angular_velocity, field: "xyz[0]", scale: 57.29577951308232 }
+      - { topic: vehicle_attitude, field: rollspeed, scale: 57.29577951308232 }
+  - name: rate.pitch
+    unit: deg/s
+    sources:
+      - { topic: vehicle_angular_velocity, field: "xyz[1]", scale: 57.29577951308232 }
+      - { topic: vehicle_attitude, field: pitchspeed, scale: 57.29577951308232 }
+  - name: rate.yaw
+    unit: deg/s
+    sources:
+      - { topic: vehicle_angular_velocity, field: "xyz[2]", scale: 57.29577951308232 }
+      - { topic: vehicle_attitude, field: yawspeed, scale: 57.29577951308232 }
+  - name: rate.des_roll
+    unit: deg/s
+    sources:
+      - { topic: vehicle_rates_setpoint, field: roll, scale: 57.29577951308232 }
+  - name: rate.des_pitch
+    unit: deg/s
+    sources:
+      - { topic: vehicle_rates_setpoint, field: pitch, scale: 57.29577951308232 }
+  - name: rate.des_yaw
+    unit: deg/s
+    sources:
+      - { topic: vehicle_rates_setpoint, field: yaw, scale: 57.29577951308232 }
+  - name: ctrl.thrust
+    unit: fraction
+    sources:
+      - { topic: vehicle_attitude_setpoint, field: "thrust_body[2]", scale: -1.0 }
+      - { topic: vehicle_attitude_setpoint, field: thrust }
+
+  # Flight state: used to restrict checks to time in the air and to modes
+  # where the attitude controller is active
+  - name: state.landed
+    unit: flag
+    sources:
+      - { topic: vehicle_land_detected, field: landed }
+  - name: state.att_ctrl
+    unit: flag
+    sources:
+      - { topic: vehicle_control_mode, field: flag_control_attitude_enabled }
+
+  # Power and radio
+  - name: power.5v
+    unit: V
+    sources:
+      - { topic: system_power, field: voltage5v_v, zero_is_missing: true }
+  - name: rc.rssi
+    unit: "%"
+    sources:
+      - { topic: input_rc, field: rssi, min_valid: 0, max_valid: 100 }
+  - name: rc.lost
+    unit: flag
+    sources:
+      - { topic: input_rc, field: rc_lost }
+
+# Topics read by the computed signals in ulog.py.
+computed_topics:
+  - vehicle_attitude
+  - vehicle_attitude_setpoint
+  - vehicle_imu_status
+  - actuator_motors
+  - actuator_outputs
+  - vehicle_status
+  - sensor_gps

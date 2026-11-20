@@ -70,6 +70,7 @@ def process_log(
     from flightlens.model import Severity
     from flightlens.provenance import versions_of
     from flightlens.spectrum import analyze_spectrum
+    from flightlens.tuning import analyze_tuning
 
     flight = parsers.load(Path(log_path))
     profile = profiles.resolve(flight.metadata.serial) if profiles else None
@@ -101,6 +102,11 @@ def process_log(
     ]
     data["segments"] = [{"start": s.start, "end": s.end} for s in flight.segments]
     (tmp / "report.json").write_text(json.dumps(_clean(data), allow_nan=False), encoding="utf-8")
+    tuning = analyze_tuning(flight)
+    if tuning is not None:
+        (tmp / "tuning.json").write_text(
+            json.dumps(_clean(tuning.to_dict()), allow_nan=False), encoding="utf-8"
+        )
     spec = analyze_spectrum(flight)
     if spec is not None:
         (tmp / "spectrum.json").write_text(

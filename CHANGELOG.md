@@ -9,6 +9,19 @@ thresholds do.
 ## [0.2.0] - unreleased
 
 ### Added
+- **Rate-loop tuning** (`control.tuning`): the roll and pitch rate controllers'
+  step response, estimated from normal flying by regularised deconvolution
+  (as PID-Analyzer and PX4 Flight Review do), with overshoot, falls-short,
+  does-not-follow and sluggish findings. Judged only when at least 20 windows
+  with a coherence of 0.6 support it; checked against simulated loops of known
+  damping (peaks within 0.15). A "Tuning" tab plots the response per axis.
+  ArduPlane rate data now comes from `PIDR/PIDP/PIDY`.
+- **Autopilot power** (`power.supply`), **battery reserve at landing**
+  (`battery.reserve`, ignoring estimates that follow voltage sag), **compass
+  interference** (`compass.interference`), **estimator lane switches**
+  (`estimator.lanes`) and **RC link** (`rc.link`, PX4).
+- The fault benchmark grows to 41 logs (tuning, brown-out, battery reserve,
+  compass and lane-switch faults, each with a healthy case near the limit).
 - **Printable reports**: a self-contained HTML report per flight (evidence
   charts, provenance, reviews; print to PDF), from the "Report" link or
   `flightlens analyze --html`.

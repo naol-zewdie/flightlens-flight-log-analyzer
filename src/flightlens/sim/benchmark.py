@@ -10,8 +10,8 @@ here* (with sensor noise, marginal levels and healthy flights near every
 limit). They do not prove the signatures are realistic; that is what the SITL
 campaign (``scripts/sitl_campaign.py``) and real labelled logs are for.
 
-Copter flight: 4S quad, arm 5 s, takeoff 8 s, climb to 15 m by 15 s, Loiter
-from 20 s, land 165 s, disarm 168 s, log end 175 s, 10 Hz.
+Copter flight: 4S quad (5200 mAh), arm 5 s, takeoff 8 s, climb to 15 m by 15 s, Loiter
+from 20 s, land 165 s, disarm 168 s, log end 175 s, 10 Hz (rate loop 100 Hz).
 """
 
 from __future__ import annotations
@@ -72,7 +72,9 @@ def copter(
     w.define("BAT", "QBfffB", "TimeUS,Inst,Volt,Curr,CurrTot,RemPct")
     w.define("GPS", "QBBIHBcLLeff", "TimeUS,I,Status,GMS,GWk,NSats,HDop,Lat,Lng,Alt,Spd,VZ")
     w.define("POS", "QLLff", "TimeUS,Lat,Lng,Alt,RelHomeAlt")
-    w.define("XKF4", "QBcccc", "TimeUS,C,SV,SP,SH,SM")
+    w.define("XKF4", "QBccccB", "TimeUS,C,SV,SP,SH,SM,PI")
+    w.define("POWR", "QffH", "TimeUS,Vcc,VServo,Flags")
+    w.define("MAG", "QBfff", "TimeUS,I,MagX,MagY,MagZ")
     w.define("RCOU", "Q" + "H" * 8, "TimeUS," + ",".join(f"C{i}" for i in range(1, 9)))
     w.define("CTUN", "Qf", "TimeUS,ThO")
     w.define("ISBH", "QHBBHHQf", "TimeUS,N,type,instance,mul,smp_cnt,SampleUS,smp_rate")
@@ -81,7 +83,9 @@ def copter(
     def us(t: float) -> int:
         return BOOT_US + round(t * 1e6)
 
+    capacity = level if kind == "low_reserve" else 5200.0
     params = {"MOT_PWM_MIN": 1000, "MOT_PWM_MAX": 2000, "MOT_BAT_VOLT_MAX": 4.2 * CELLS}
+    params |= {"BATT_CAPACITY": capacity}
     params |= {"INS_LOG_BAT_MASK": 1, "INS_GYRO_FILTER": 80} | (extra or {})
     params |= {f"SERVO{ch}_FUNCTION": 32 + ch for ch in range(1, 5)}
     for name, value in params.items():
@@ -101,6 +105,22 @@ def copter(
 
     clip = 0
     used = 0.0
+    # Rate loop per axis: a second-order system (natural frequency wn, damping
+    # zeta) following stick steps (20-95 s; a calm hover after, which the motor
+    # balance check needs), logged at 100 Hz. Healthy: wn 35 rad/s,
+    # zeta 0.75 (peaks about 3% over). Tuning faults change the roll axis.
+    wn = np.array([35.0, 35.0, 20.0])
+    zeta = np.array([0.75, 0.75, 0.9])
+    if kind == "tuning_overshoot":
+        zeta[0] = level
+    if kind == "tuning_sluggish":
+        wn[0] = level
+    rate_sp = np.zeros(3)
+    rate_x = np.zeros(3)
+    rate_v = np.zeros(3)
+    next_step = np.zeros(3)
+    earth = np.array([0.22, 0.05, 0.42])  # gauss, body frame (level, heading fixed)
+    mag_per_amp = level if kind == "compass_interference" else 0.0004
     for k in range(int(end * 10)):
         t = k / 10
         if kind == "arming_refused" and k % 50 == 0 and t > 2:
@@ -154,17 +174,31 @@ def copter(
             DesYaw=90,
             Yaw=90 + rng.normal(0, 0.5),
         )
-        rate = rng.normal(0, 1.5, 3) if flying else np.zeros(3)
-        w.write(
-            "RATE",
-            TimeUS=us(t),
-            RDes=rate[0],
-            R=rate[0] + rng.normal(0, 0.3),
-            PDes=rate[1],
-            P=rate[1],
-            YDes=rate[2],
-            Y=rate[2],
-        )
+        for j in range(10):
+            tj = t + j * 0.01
+            # stick and position-controller activity 20-95 s, steady hover after it
+            if flying and 20 <= tj < 95:
+                for a in range(3):
+                    if tj >= next_step[a]:  # the pilot or position controller asks for a new rate
+                        rate_sp[a] = rng.normal(0, 30.0 if a < 2 else 15.0)
+                        next_step[a] = tj + rng.uniform(0.25, 0.8)
+            else:
+                rate_sp[:] = 0.0
+            for _ in range(5):  # integrate at 500 Hz
+                acc = wn**2 * (rate_sp - rate_x) - 2 * zeta * wn * rate_v
+                rate_v += acc * 0.002
+                rate_x += rate_v * 0.002
+            gyro = rate_x + (rng.normal(0, 1.0, 3) if flying else 0.0)
+            w.write(
+                "RATE",
+                TimeUS=us(tj),
+                RDes=rate_sp[0],
+                R=gyro[0],
+                PDes=rate_sp[1],
+                P=gyro[1],
+                YDes=rate_sp[2],
+                Y=gyro[2],
+            )
 
         base = 14.0 if flying else 3.0
         vib = np.abs(rng.normal(base, base * 0.12, 3))
@@ -183,7 +217,18 @@ def copter(
             cur, cell = 70.0, level
         used += cur / 3.6 * 0.1  # mAh per 0.1 s
         volt = CELLS * cell + rng.normal(0, 0.02)
-        w.write("BAT", TimeUS=us(t), Inst=0, Volt=volt, Curr=cur, CurrTot=used)
+        remaining = max(0.0, 100 * (0.97 - used / capacity))  # took off on a 97% pack
+        w.write(
+            "BAT", TimeUS=us(t), Inst=0, Volt=volt, Curr=cur, CurrTot=used, RemPct=round(remaining)
+        )
+        vcc = 5.05 + rng.normal(0, 0.02)
+        if kind == "brownout" and within(t):
+            vcc = level + rng.normal(0, 0.01)
+        if k % 2 == 0:  # POWR at 5 Hz, as ArduPilot logs it
+            w.write("POWR", TimeUS=us(t), Vcc=vcc, VServo=0.0, Flags=0)
+        b = earth + rng.normal(0, 0.003, 3)
+        b[2] += mag_per_amp * cur  # the power wiring's own field grows with current
+        w.write("MAG", TimeUS=us(t), I=0, MagX=b[0] * 1000, MagY=b[1] * 1000, MagZ=b[2] * 1000)
 
         sats, hdop, status = int(rng.integers(13, 17)), rng.normal(0.75, 0.04), 3
         if kind == "gps_degraded" and within(t):
@@ -219,6 +264,7 @@ def copter(
             SP=abs(rng.normal(0.12, 0.04)),
             SH=abs(rng.normal(0.1, 0.03)),
             SM=abs(rng.normal(0.08, 0.03)),
+            PI=1 if kind == "lane_switch" and fault is not None and t >= fault.start else 0,
         )
 
         # gyro noise varies throttle so motor noise can be told from frame resonance
@@ -391,6 +437,39 @@ def scenarios() -> list[Scenario]:
     out.append(Scenario("copter-gyro-noise-notched", "healthy (near limit)",
                         lambda p: copter(p, Fault("gyro_noise", level=12.0), 7, notch),
                         "healthy"))  # fmt: skip
+    # rate-loop tuning (whole flight, roll axis): damping 0.2 peaks at 1.53, 0.08 at 1.78
+    f = Fault("tuning_overshoot", level=0.2)
+    add("copter-tuning-overshoot", "tuning", f, ["control.tuning:attention"], verdict="attention")
+    f = Fault("tuning_overshoot", level=0.08)
+    add("copter-tuning-oscillating", "tuning", f, ["control.tuning:problem"], verdict="problem")
+    f = Fault("tuning_overshoot", level=0.45)
+    add("copter-tuning-near-limit", "healthy (near limit)", f, [], verdict="healthy")
+    f = Fault("tuning_sluggish", level=5.0)
+    add("copter-tuning-sluggish", "tuning", f, ["control.tuning:attention"], verdict="attention")
+    f = Fault("brownout", 60, 75, 4.35)
+    add("copter-brownout", "power", f, [_win("power.supply", "attention", f)], verdict="attention")
+    f = Fault("brownout", 60, 75, 4.2)
+    add("copter-brownout-severe", "power", f, [_win("power.supply", "problem", f)],
+        verdict="problem")  # fmt: skip
+    f = Fault("brownout", 60, 75, 4.6)
+    add("copter-supply-low-but-ok", "healthy (near limit)", f, [], verdict="healthy")
+    f = Fault("low_reserve", level=1100)
+    add("copter-low-reserve", "battery", f, ["battery.reserve:attention"], verdict="attention")
+    f = Fault("low_reserve", level=1000)
+    add("copter-empty-battery", "battery", f, ["battery.reserve:problem"], verdict="problem")
+    f = Fault("low_reserve", level=1300)
+    add("copter-reserve-near-limit", "healthy (near limit)", f, [], verdict="healthy")
+    f = Fault("compass_interference", level=0.0074)
+    add("copter-compass-interference", "compass", f, ["compass.interference:attention"],
+        verdict="attention")  # fmt: skip
+    f = Fault("compass_interference", level=0.015)
+    add("copter-compass-interference-severe", "compass", f, ["compass.interference:problem"],
+        verdict="problem")  # fmt: skip
+    f = Fault("compass_interference", level=0.0037)
+    add("copter-compass-near-limit", "healthy (near limit)", f, [], verdict="healthy")
+    f = Fault("lane_switch", 70, 75)
+    add("copter-lane-switch", "estimator", f, [_win("estimator.lanes", "attention", f, 2)],
+        verdict="attention")  # fmt: skip
     f = Fault("takeoff_failure")
     add("copter-takeoff-failure", "never flew", f, ["flight.takeoff:problem"], verdict="problem")
     f = Fault("arming_refused")

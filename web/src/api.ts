@@ -208,6 +208,28 @@ export interface Spectrum {
   spectrogram: { t: number[]; f: number[]; db: (number | null)[][] };
 }
 
+export interface AxisResponse {
+  axis: "roll" | "pitch" | "yaw";
+  fs: number;
+  windows: number;
+  t: number[];
+  step: number[];
+  low: number[];
+  high: number[];
+  final: number;
+  peak: number;
+  overshoot: number;
+  rise_s: number | null;
+  input_dps: number;
+  coherence: number;
+}
+
+export interface Tuning {
+  airframe: string;
+  response_s: number;
+  axes: Partial<Record<"roll" | "pitch" | "yaw", AxisResponse>>;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -253,6 +275,7 @@ export const api = {
     call<{ events: FlightEvent[]; segments: { start: number; end: number }[] }>(`/flights/${id}/events`),
   track: (id: string) => call<Track>(`/flights/${id}/track`),
   spectrum: (id: string) => call<{ spectrum: Spectrum | null }>(`/flights/${id}/spectrum`),
+  tuning: (id: string) => call<{ tuning: Tuning | null }>(`/flights/${id}/tuning`),
   signals: (id: string, names: string[], range?: [number, number], maxPoints = 2000) => {
     const p = new URLSearchParams({ names: names.join(","), max_points: String(maxPoints) });
     if (range) {

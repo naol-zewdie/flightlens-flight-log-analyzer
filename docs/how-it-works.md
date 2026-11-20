@@ -102,6 +102,22 @@ gone or present in both. Open it from two selected flights in the library, from
 "Compare with #n" in an aircraft's flight list, or "Compare…" on a flight, which
 picks the previous flight of the same aircraft.
 
+## Rate-loop tuning
+
+A flight never contains a clean step input, but every stick input and every
+correction is an input to the rate controller, and the gyro shows its output.
+Over two-second windows of flight, FlightLens estimates the controller's
+response by regularised (Wiener) deconvolution of the measured rate by the
+setpoint and integrates it into a step response; the median over all windows
+is shown on the *Tuning* tab with the spread between windows.
+
+An estimate is only judged when it is trustworthy: at least 20 windows with
+stick or correction activity, and a setpoint that explains the measured rate
+(coherence of at least 0.6 below 3 Hz). On simulated loops of known damping
+the estimated peak is within 0.15 of the true one; on real 50 Hz logs, fewer
+windows gave spurious peaks, which is why the gate exists. Yaw is shown but
+not judged.
+
 ## Reports
 
 Each flight has a printable report (the "Report" link on a flight, or

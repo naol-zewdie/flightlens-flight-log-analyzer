@@ -154,6 +154,7 @@ export function FlightPage() {
           <nav className="tabs">
             <NavLink to="" end>Overview</NavLink>
             <NavLink to="signals">Signals</NavLink>
+            <NavLink to="tuning">Tuning</NavLink>
             <NavLink to="spectrum">Noise spectrum</NavLink>
             <NavLink to="events">Events<span className="count">{data.events.length}</span></NavLink>
             <NavLink to="quality">

@@ -9,6 +9,7 @@ import { FlightPage } from "./pages/FlightPage";
 import { Overview } from "./pages/Overview";
 import { SignalsView } from "./pages/SignalsView";
 import { SpectrumView } from "./pages/SpectrumView";
+import { TuningView } from "./pages/TuningView";
 import { EventsView } from "./pages/EventsView";
 import { QualityView } from "./pages/QualityView";
 
@@ -24,6 +25,7 @@ export function App() {
         <Route path="/flights/:id" element={<FlightPage />}>
           <Route index element={<Overview />} />
           <Route path="signals" element={<SignalsView />} />
+          <Route path="tuning" element={<TuningView />} />
           <Route path="spectrum" element={<SpectrumView />} />
           <Route path="events" element={<EventsView />} />
           <Route path="quality" element={<QualityView />} />

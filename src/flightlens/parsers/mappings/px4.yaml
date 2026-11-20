@@ -15,7 +15,7 @@
 # Signals that need computation (attitude angles from quaternions, motors,
 # vibration across IMUs, arming segments, events) are built in ulog.py.
 
-version: "px4-2026.11.3"
+version: "px4-2026.11.4"
 
 signals:
   # Battery
@@ -189,6 +189,29 @@ signals:
     unit: flag
     sources:
       - { topic: input_rc, field: rc_lost }
+
+  # Magnetometer (gauss, body frame, the estimator's selected one)
+  - name: mag.x
+    unit: G
+    sources:
+      - { topic: vehicle_magnetometer, field: "magnetometer_ga[0]" }
+      - { topic: sensor_mag, field: x }
+  - name: mag.y
+    unit: G
+    sources:
+      - { topic: vehicle_magnetometer, field: "magnetometer_ga[1]" }
+      - { topic: sensor_mag, field: y }
+  - name: mag.z
+    unit: G
+    sources:
+      - { topic: vehicle_magnetometer, field: "magnetometer_ga[2]" }
+      - { topic: sensor_mag, field: z }
+
+  # Which estimator instance (IMU/lane) the vehicle uses
+  - name: ekf.primary
+    unit: index
+    sources:
+      - { topic: estimator_selector_status, field: primary_instance }
 
 # Topics read by the computed signals in ulog.py.
 computed_topics:

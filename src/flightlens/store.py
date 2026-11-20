@@ -490,6 +490,13 @@ class Store:
         data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
         return data
 
+    def read_tuning(self, flight_id: str) -> dict[str, Any] | None:
+        path = self.flight_dir(flight_id) / "analysis" / "tuning.json"
+        if not path.exists():
+            return None
+        data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        return data
+
     def read_spectrum(self, flight_id: str) -> dict[str, Any] | None:
         path = self.flight_dir(flight_id) / "analysis" / "spectrum.json"
         if not path.exists():

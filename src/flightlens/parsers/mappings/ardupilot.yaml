@@ -17,7 +17,7 @@
 # SERVOn_FUNCTION, arming segments, landed state, modes, events, battery cell
 # count) are built in ardupilot.py.
 
-version: "ardupilot-2026.11.3"
+version: "ardupilot-2026.11.4"
 
 signals:
   # Attitude (deg)
@@ -40,25 +40,26 @@ signals:
     unit: deg
     sources: [{ topic: ATT, field: DesYaw }]
 
-  # Angular rate (deg/s)
+  # Angular rate (deg/s). Copter logs RATE; Plane logs no RATE but its rate
+  # controllers' PID messages carry the same target and actual rate in deg/s.
   - name: rate.roll
     unit: deg/s
-    sources: [{ topic: RATE, field: R }]
+    sources: [{ topic: RATE, field: R }, { topic: PIDR, field: Act }]
   - name: rate.pitch
     unit: deg/s
-    sources: [{ topic: RATE, field: P }]
+    sources: [{ topic: RATE, field: P }, { topic: PIDP, field: Act }]
   - name: rate.yaw
     unit: deg/s
-    sources: [{ topic: RATE, field: Y }]
+    sources: [{ topic: RATE, field: Y }, { topic: PIDY, field: Act }]
   - name: rate.des_roll
     unit: deg/s
-    sources: [{ topic: RATE, field: RDes }]
+    sources: [{ topic: RATE, field: RDes }, { topic: PIDR, field: Tar }]
   - name: rate.des_pitch
     unit: deg/s
-    sources: [{ topic: RATE, field: PDes }]
+    sources: [{ topic: RATE, field: PDes }, { topic: PIDP, field: Tar }]
   - name: rate.des_yaw
     unit: deg/s
-    sources: [{ topic: RATE, field: YDes }]
+    sources: [{ topic: RATE, field: YDes }, { topic: PIDY, field: Tar }]
 
   # Battery (BAT since 3.6; CURR before)
   - name: bat.volt
@@ -160,6 +161,22 @@ signals:
     sources:
       - { topic: XKF4, field: SM, min_valid: 0 }
       - { topic: NKF4, field: SM, min_valid: 0 }
+  # Primary EKF core (lane); a change in flight is a lane switch
+  - name: ekf.primary
+    unit: index
+    sources:
+      - { topic: XKF4, field: PI }
+
+  # Magnetometer (first compass; MAG is in milligauss)
+  - name: mag.x
+    unit: G
+    sources: [{ topic: MAG, field: MagX, scale: 0.001 }]
+  - name: mag.y
+    unit: G
+    sources: [{ topic: MAG, field: MagY, scale: 0.001 }]
+  - name: mag.z
+    unit: G
+    sources: [{ topic: MAG, field: MagZ, scale: 0.001 }]
 
   # Control
   - name: ctrl.thrust

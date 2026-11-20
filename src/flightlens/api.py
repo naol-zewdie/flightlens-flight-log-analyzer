@@ -496,6 +496,12 @@ def create_app(
             )
         return {"signals": out}
 
+    @app.get("/api/flights/{flight_id}/tuning")
+    def tuning(flight_id: str) -> dict[str, Any]:
+        """Rate-loop step response per axis (median and spread), or null."""
+        report_or_409(flight_id)
+        return {"tuning": store.read_tuning(flight_id)}
+
     @app.get("/api/flights/{flight_id}/spectrum")
     def spectrum(flight_id: str) -> dict[str, Any]:
         """Gyro noise spectrum (PSD per axis, throttle tracking, spectrogram), or null."""

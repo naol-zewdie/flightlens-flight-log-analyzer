@@ -33,6 +33,61 @@ Version 1.1.0 · signals: `att.roll`, `att.pitch`, `att.des_roll`, `att.des_pitc
 | `yaw_problem` | 30 |
 | `min_duration_s` | 2 |
 
+## Power and link checks: the autopilot's 5 V supply, battery reserve, RC link
+
+**power.supply** — signal ``power.5v`` (V; PX4 ``system_power.voltage5v_v``,
+ArduPilot ``POWR.Vcc``), in the air. The flight controller and its sensors run
+from this rail; below about 4.5 V boards start to brown out and reset. Healthy
+boards in the calibration logs sit at 4.6-5.25 V (servos on the rail make it
+swing by up to 0.35 V, which is not judged). Attention below ``attention``
+(4.5 V), Problem below ``problem`` (4.3 V).
+
+**battery.reserve** — signal ``bat.remaining`` (0-1), the flight controller's
+own estimate. Judged at landing (the median of the last few seconds in the
+air), and only when the estimate tracks the charge used: it must fall during
+the flight (many logs carry a constant 0 or 1 because the capacity is not
+configured), not faster than ``max_drop_per_min`` (half a pack per minute),
+and never rise by ``max_rise`` (10 points) in the air. An estimate that breaks
+the last two follows the voltage sag under load, as seen on real PX4 logs
+(50% to 0% in 30 s of flight, back to 23% after landing).
+Attention below ``attention`` (20% left), Problem below ``problem`` (10%).
+
+**rc.link** — signal ``rc.lost`` (PX4 ``input_rc.rc_lost``), in the air.
+Attention for any loss of the RC signal; Problem when it adds up to
+``problem_s`` (1 s) or more. ArduPilot reports RC loss as a failsafe event,
+which ``events.failsafes`` already covers.
+
+### `battery.reserve` · Battery reserve at landing
+
+Version 1.0.0 · signals: `bat.remaining`
+
+| Setting | Default |
+|---|---|
+| `attention` | 0.2 |
+| `problem` | 0.1 |
+| `min_drop` | 0.05 |
+| `max_drop_per_min` | 0.5 |
+| `max_rise` | 0.1 |
+| `landing_window_s` | 5 |
+
+### `power.supply` · Autopilot power supply
+
+Version 1.0.0 · signals: `power.5v`
+
+| Setting | Default |
+|---|---|
+| `attention` | 4.5 |
+| `problem` | 4.3 |
+| `min_duration_s` | 0 |
+
+### `rc.link` · RC link
+
+Version 1.0.0 · signals: `rc.lost`
+
+| Setting | Default |
+|---|---|
+| `problem_s` | 1 |
+
 ## Battery sag check
 
 Signals: ``bat.volt`` and the cell count (``bat.cells``, or the BAT1_N_CELLS /
@@ -52,6 +107,34 @@ Version 1.2.0 · signals: `bat.volt`
 | `attention` | 3.5 |
 | `problem` | 3.3 |
 | `min_duration_s` | 1 |
+
+## Compass interference: the magnetic field changes with motor current
+
+Signals: ``mag.x/y/z`` (gauss) and ``bat.curr`` (A), in the air.
+
+The Earth's field is constant over a flight, so its measured strength should
+be too. Current in nearby power wires and motors adds a field of its own, which
+grows with the current: the estimator then sees a heading error that changes
+with throttle (toilet-bowling, drifting heading, EKF compass failures).
+
+The field strength is fitted against current. As in ArduPilot's compassmot,
+the interference is the field the current adds at the highest current of the
+flight, relative to the Earth's field (the fitted strength at zero current).
+It only sees the part of the interference that changes the field's strength
+(not its direction), so it is a lower bound, judged against compassmot's
+limits: Attention above ``attention`` (30%), Problem above ``problem`` (60%).
+It needs at least ``min_current_span`` (3 A) between low and high current in
+the air.
+
+### `compass.interference` · Compass interference
+
+Version 1.0.0 · signals: `mag.x`, `mag.y`, `mag.z`, `bat.curr`
+
+| Setting | Default |
+|---|---|
+| `attention` | 30 |
+| `problem` | 60 |
+| `min_current_span` | 3 |
 
 ## Control checks: attitude beyond the configured limits, control surfaces at full
 
@@ -103,6 +186,52 @@ Version 1.0.0 · signals: `ctrl.ail`, `att.roll`
 | `level_deg` | 10 |
 | `min_level_s` | 10 |
 
+## Rate-loop tuning: the step response of the roll and pitch rate controllers
+
+Signals: ``rate.des_<axis>`` and ``rate.<axis>`` (deg/s), in the air and, when
+the log says so, only while the flight controller stabilises (not Manual).
+
+The step response is estimated from normal flying (``flightlens.tuning``). It
+is judged only when the estimate is trustworthy: at least ``min_windows``
+two-second windows with stick or correction activity, and a setpoint that
+explains the measured rate (coherence ≥ ``min_coherence``). Yaw is shown in the
+web app but not judged: its loop is normally much slower.
+
+Calibration: on simulated loops of known damping the estimated peak is within
+0.1 of the true one; on 20 public PX4 flights the well-flown ones settle at
+0.9-1.1 with at most +0.2 of overshoot. Estimates from fewer than 20 windows
+were too noisy on real 50 Hz logs (spurious peaks of 1.3-1.6) to be judged.
+
+- **Overshoot**: the peak above where the response settles (or above 1.0, if it
+  settles lower) exceeds ``overshoot_attention`` (+0.3) — Attention; above
+  ``overshoot_problem`` (+0.6) — Problem. A loop that settles above 1 without
+  ringing is not overshoot.
+- **Does not reach the setpoint**: settles below ``final_low`` (0.7) — Attention.
+- **Does not follow the setpoint**: settles outside ``final_min``..``final_max``
+  (0.5-1.6 times) — Attention: the controller is not in control of this axis
+  (actuators saturated, out of trim, feed-forward wrong), or the logged
+  setpoint is not the one flown.
+- **Sluggish**: 90% of the final value takes longer than ``rise_attention_s``
+  (0.3 s multicopter, 0.8 s fixed wing) — Attention. A sluggish loop has not
+  settled within the window, so it is not also reported as falling short.
+
+### `control.tuning` · Rate-loop tuning
+
+Version 1.0.0 · signals: `rate.roll`, `rate.des_roll`
+
+| Setting | Default |
+|---|---|
+| `min_windows` | 20 |
+| `min_coherence` | 0.6 |
+| `min_input_dps` | 5 |
+| `overshoot_attention` | 0.3 |
+| `overshoot_problem` | 0.6 |
+| `final_low` | 0.7 |
+| `final_min` | 0.5 |
+| `final_max` | 1.6 |
+| `rise_attention_s` | 0.3 |
+| `fw_rise_attention_s` | 0.8 |
+
 ## Estimator (EKF) health check
 
 Signals: innovation test ratios ``ekf.vel``, ``ekf.pos``, ``ekf.hgt``,
@@ -124,6 +253,25 @@ Version 1.2.0 · signals: `ekf.hgt`
 | `problem` | 1 |
 | `min_duration_s` | 1 |
 | `heading_settle_s` | 10 |
+
+## Estimator lane switches: the flight controller changed which estimator it trusts
+
+Signal: ``ekf.primary`` (PX4 ``estimator_selector_status.primary_instance``,
+ArduPilot ``XKF4.PI``), in the air.
+
+Flight controllers with several IMUs run one estimator (lane, core) per IMU and
+fly on the one whose sensors agree best. A switch in flight means the active
+one became worse than another: an IMU or magnetometer disagreed, or vibration
+or a sensor fault upset it. One switch is Attention; ``problem_switches`` (3) or
+more is Problem, a sign of a persistent sensor problem.
+
+### `estimator.lanes` · Estimator lane switches
+
+Version 1.0.0 · signals: `ekf.primary`
+
+| Setting | Default |
+|---|---|
+| `problem_switches` | 3 |
 
 ## Events, errors and failsafes check
 

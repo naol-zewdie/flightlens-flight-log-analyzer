@@ -16,9 +16,12 @@ def _all_types(tmp_path: Path) -> Path:
     w = DFWriter()
     # A format string holds at most 16 characters, so the text types get their own message.
     w.define("TEST", "QbBhHiIfdqcCeELM", "TimeUS,b,B,h,H,i,I,f,d,q,c,C,e,E,L,M")
-    w.define("TXT", "QnNZ", "TimeUS,n,N,Z")
+    # text columns carry the names real firmware uses for text (dataflash.TEXT_COLUMNS)
+    w.define("TXT", "QnNZ", "TimeUS,TN,Name,Message")
     for k in range(3):
-        w.write("TXT", TimeUS=1_000_000 + k * 1000, n="abcd", N="sixteen", Z="a longer text")
+        w.write(
+            "TXT", TimeUS=1_000_000 + k * 1000, TN="abcd", Name="sixteen", Message="a longer text"
+        )
         w.write(
             "TEST",
             TimeUS=1_000_000 + k * 1000,
@@ -53,11 +56,32 @@ def test_every_format_character_round_trips(tmp_path: Path) -> None:
     assert c["e"][0] == pytest.approx(-1234.56)
     assert c["E"][0] == pytest.approx(7890.12)
     assert c["L"][0] == pytest.approx(-35.1234567, abs=1e-7)
-    assert log.text("TXT", "n") == ["abcd"] * 3
-    assert log.text("TXT", "N") == ["sixteen"] * 3
-    assert log.text("TXT", "Z")[0] == "a longer text"
+    assert log.text("TXT", "TN") == ["abcd"] * 3
+    assert log.text("TXT", "Name") == ["sixteen"] * 3
+    assert log.text("TXT", "Message")[0] == "a longer text"
     assert log.start_us == 1_000_000 and log.end_us == 1_002_000
     assert log.issues == []
+
+
+@pytest.mark.parametrize(
+    ("fmt", "cols", "values"),
+    [
+        ("QZ", "TimeUS,GyrX", {"GyrX": "oops"}),  # a number column declared as text
+        ("Qf", "TimeUS,Message", {"Message": 1.0}),  # a text column declared as a number
+        ("Qf", "Time,X", {"Time": 1.0, "X": 2.0}),  # no timestamp column
+    ],
+)
+def test_damaged_definitions_are_skipped_not_trusted(
+    tmp_path: Path, fmt: str, cols: str, values: dict[str, object]
+) -> None:
+    w = DFWriter()
+    w.define("GOOD", "Qf", "TimeUS,X")
+    w.define("BAD", fmt, cols)
+    w.write("GOOD", TimeUS=1, X=1.0)
+    w.write("BAD", **({"TimeUS": 2} if cols.startswith("TimeUS") else {}), **values)
+    log = dataflash.read(w.save(tmp_path / "d.bin"))
+    assert set(log.messages) == {"GOOD"}
+    assert len(log.issues) == 1 and "BAD" in log.issues[0].message
 
 
 def test_only_wanted_types_are_decoded(tmp_path: Path) -> None:

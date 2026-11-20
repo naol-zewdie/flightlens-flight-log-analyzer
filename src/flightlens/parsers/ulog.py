@@ -116,6 +116,78 @@ class ULogParseError(Exception):
     pass
 
 
+READ_BUDGET_FACTOR = 8
+READ_BUDGET_EXTRA = 4 << 20
+
+
+class _ReadBudgetExceededError(Exception):
+    """Not one of the errors pyulog catches, so it stops pyulog's read loops."""
+
+
+class _BudgetedFile:
+    """A file that refuses to read more than a fixed multiple of its own size.
+
+    pyulog (1.3.0) can loop forever on some damaged files: after a corrupt
+    message near the end it seeks back further than it advanced. A valid log
+    is read about once, so a reader that has read many times the file's size is
+    going round in circles; stopping it turns a hang into a clear error.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._fh = path.open("rb")
+        self._left = READ_BUDGET_FACTOR * path.stat().st_size + READ_BUDGET_EXTRA
+
+    def read(self, n: int = -1) -> bytes:
+        data = self._fh.read(n)
+        self._left -= len(data) + 1  # +1: even empty reads count, so a stuck loop ends
+        if self._left < 0:
+            raise _ReadBudgetExceededError
+        return data
+
+    def __getattr__(self, name: str) -> Any:  # seek, tell, close, ...
+        return getattr(self._fh, name)
+
+
+def _clean_topics(ulog: ULog, quality: list[ParseIssue]) -> dict[TopicKey, TopicData]:
+    """Topics usable as time series: a 1-D timestamp, every field the same length.
+
+    A damaged file can yield a topic whose format lost its timestamp field or
+    whose columns disagree; such a topic is dropped and reported, not trusted.
+    """
+    topics: dict[TopicKey, TopicData] = {}
+    for d in ulog.data_list:
+        key = (d.name, int(d.multi_id))
+        data = d.data
+        ts = data.get("timestamp") if isinstance(data, dict) else None
+        ok = (
+            isinstance(ts, np.ndarray)
+            and ts.ndim == 1
+            and np.issubdtype(ts.dtype, np.number)
+            and all(isinstance(v, np.ndarray) and v.shape[:1] == ts.shape for v in data.values())
+        )
+        if ok:
+            topics[key] = data
+        else:
+            quality.append(ParseIssue("corrupt", f"{key[0]}[{key[1]}] is damaged and was ignored"))
+    return topics
+
+
+def _numeric_parameters(raw: dict[str, Any], quality: list[ParseIssue]) -> dict[str, float]:
+    params: dict[str, float] = {}
+    bad = 0
+    for k, v in raw.items():
+        try:
+            value = float(v)
+        except (TypeError, ValueError):
+            bad += 1
+            continue
+        if np.isfinite(value):
+            params[str(k)] = value
+    if bad:
+        quality.append(ParseIssue("corrupt", f"{bad} parameters have unreadable values"))
+    return params
+
+
 def load_mapping() -> dict[str, Any]:
     return _load_mapping("px4")
 
@@ -129,14 +201,21 @@ def needed_topics(mapping: dict[str, Any]) -> list[str]:
 
 def parse(path: Path) -> Flight:
     mapping = load_mapping()
+    fh = _BudgetedFile(path)
     try:
-        ulog = ULog(str(path), needed_topics(mapping))
+        ulog = ULog(fh, needed_topics(mapping))
+    except _ReadBudgetExceededError:
+        raise ULogParseError(
+            "the file is damaged: the ULog reader kept re-reading it without making progress"
+        ) from None
     except Exception as exc:  # pyulog raises a variety of errors on bad input
         raise ULogParseError(f"not a readable ULog file ({type(exc).__name__}: {exc})") from exc
+    finally:
+        fh.close()
 
     start_us = int(ulog.start_timestamp)
-    topics: dict[TopicKey, TopicData] = {(d.name, int(d.multi_id)): d.data for d in ulog.data_list}
     quality: list[ParseIssue] = []
+    topics = _clean_topics(ulog, quality)
     times: dict[TopicKey, FloatArray] = {}
 
     def time_of(key: TopicKey) -> FloatArray:
@@ -175,7 +254,7 @@ def parse(path: Path) -> Flight:
     _attitude(topics, add)
     _vibration(topics, add, time_of, quality)
     signals.update(_raw_gyro(topics, start_us))
-    params = {k: float(v) for k, v in ulog.initial_parameters.items()}
+    params = _numeric_parameters(ulog.initial_parameters, quality)
     system_type = _last_int(topics.get(("vehicle_status", 0)), "system_type")
     _motors(topics, add, params, system_type)
 
@@ -523,9 +602,12 @@ def _dropouts(ulog: ULog, start_us: int, quality: list[ParseIssue]) -> None:
 def _firmware(info: dict[str, Any]) -> str | None:
     rel = info.get("ver_sw_release")
     git = str(info.get("ver_sw", ""))[:7]
+    try:
+        rel = int(rel) if rel is not None else None
+    except (TypeError, ValueError):  # a damaged info field
+        rel = None
     if rel is None:
         return f"PX4 {git}" if git else None
-    rel = int(rel)
     major, minor, patch, kind = (
         (rel >> 24) & 0xFF,
         (rel >> 16) & 0xFF,
@@ -559,9 +641,13 @@ def _utc_start(topics: dict[TopicKey, TopicData], start_us: int) -> datetime | N
         if d is None or "time_utc_usec" not in d:
             continue
         utc = d["time_utc_usec"].astype(np.int64)
-        valid = np.flatnonzero(utc > 1_000_000_000_000_000)  # after 2001
+        # between 2001 and 2100; anything else is a damaged field
+        valid = np.flatnonzero((utc > 1_000_000_000_000_000) & (utc < 4_102_444_800_000_000))
         if valid.size:
             i = valid[0]
             start = (int(utc[i]) - (int(d["timestamp"][i]) - start_us)) / 1e6
-            return datetime.fromtimestamp(start, tz=UTC)
+            try:
+                return datetime.fromtimestamp(start, tz=UTC)
+            except (OverflowError, OSError, ValueError):
+                return None
     return None

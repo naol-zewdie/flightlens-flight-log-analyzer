@@ -768,12 +768,15 @@ def _utc_start(log: DataFlashLog) -> datetime | None:
     if not ok.size:
         return None
     i = int(ok[0])
-    utc = GPS_EPOCH + timedelta(
-        weeks=int(gps["GWk"][i]),
-        milliseconds=int(gps["GMS"][i]),
-        seconds=-GPS_LEAP_SECONDS,
-    )
-    return utc - timedelta(seconds=float(log.time_s(gps)[i]))
+    try:
+        utc = GPS_EPOCH + timedelta(
+            weeks=int(gps["GWk"][i]),
+            milliseconds=int(gps["GMS"][i]),
+            seconds=-GPS_LEAP_SECONDS,
+        )
+        return utc - timedelta(seconds=float(log.time_s(gps)[i]))
+    except (OverflowError, ValueError):  # a damaged GPS week or time of week
+        return None
 
 
 def _cells(

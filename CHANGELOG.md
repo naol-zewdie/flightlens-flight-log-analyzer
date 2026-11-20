@@ -74,6 +74,20 @@ thresholds do.
 - `flightlens serve` in a source checkout prefers `web/dist` over a bundled copy.
 
 ### Fixed
+- Damaged or hostile logs can no longer hang or crash the parsers (found by
+  fuzzing): a PX4 log that sent the ULog reader (pyulog 1.3.0) into an endless
+  loop is now refused with a clear error; ULog topics without a timestamp,
+  non-numeric parameters and damaged version/time fields are reported as data
+  quality issues instead of crashing; DataFlash message types whose FMT
+  definition is damaged (wrong column types, no timestamp) are skipped.
+
+### Security
+- Parsers are fuzzed in CI (Hypothesis, `tests/test_fuzz.py`) and weekly with a
+  long mutation campaign (`scripts/fuzz.py`).
+- CI audits the Python runtime dependencies (pip-audit) and the web UI's bundled
+  packages (npm audit); releases attach CycloneDX SBOMs for both.
+- `react-router-dom` 6.28.0 → 6.30.6 (high-severity open-redirect advisories);
+  `vite` 5.4.11 → 5.4.21 (development server only).
 - False "poor yaw tracking" and single-spike "vibration" Problems on ArduPlane
   logs (13 of 15 real logs were affected).
 

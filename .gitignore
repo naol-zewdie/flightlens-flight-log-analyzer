@@ -37,3 +37,4 @@ flightlens-demo/
 
 # docs site build output
 site/
+fuzz-failures/

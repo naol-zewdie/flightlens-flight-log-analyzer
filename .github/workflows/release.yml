@@ -55,10 +55,22 @@ jobs:
           uv venv /tmp/fl && uv pip install --python /tmp/fl/bin/python dist/*.whl
           cd /tmp && /tmp/fl/bin/flightlens version
           /tmp/fl/bin/flightlens demo --data /tmp/demo --seed-only
+      - name: SBOM (CycloneDX) of the installed wheel and the bundled web UI
+        # kept out of dist/: everything in dist/ is uploaded to PyPI
+        run: |
+          mkdir sbom
+          uvx --from cyclonedx-bom cyclonedx-py environment /tmp/fl/bin/python \
+            --of JSON -o "sbom/flightlens-${GITHUB_REF_NAME}-python.cdx.json"
+          (cd web && npm ci && npm sbom --sbom-format cyclonedx --omit dev) \
+            > "sbom/flightlens-${GITHUB_REF_NAME}-web.cdx.json"
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom/
 
   pypi:
     needs: build
@@ -117,6 +129,10 @@ jobs:
         with:
           name: dist
           path: dist/
+      - uses: actions/download-artifact@v4
+        with:
+          name: sbom
+          path: sbom/
       - name: Release notes from CHANGELOG.md
         run: |
           awk -v v="${{ needs.check.outputs.version }}" '
@@ -125,4 +141,4 @@ jobs:
             on {print}' CHANGELOG.md > notes.md
       - env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "FlightLens $GITHUB_REF_NAME" --notes-file notes.md
+        run: gh release create "$GITHUB_REF_NAME" dist/* sbom/* --title "FlightLens $GITHUB_REF_NAME" --notes-file notes.md

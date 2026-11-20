@@ -1,0 +1,44 @@
+name: Fuzz
+
+# A long campaign against both log parsers, weekly and on demand. Every pull
+# request already runs the short Hypothesis version (tests/test_fuzz.py).
+# Failing inputs are uploaded as an artifact; turn each into a regression case
+# in tests/fuzz_regressions/ when fixing it.
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: Mutants to try
+        default: "20000"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - run: uv sync
+      - name: Hypothesis, many examples
+        env:
+          FLIGHTLENS_FUZZ: "1000"
+        run: uv run pytest tests/test_fuzz.py -q
+      - name: Mutation campaign
+        run: >
+          uv run python scripts/fuzz.py
+          --iterations "${{ github.event.inputs.iterations || '20000' }}"
+          --seed "${{ github.run_number }}"
+          --out fuzz-failures
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-failures
+          path: fuzz-failures/

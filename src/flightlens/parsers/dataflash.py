@@ -33,6 +33,12 @@ from flightlens.model import ParseIssue
 HEAD = b"\xa3\x95"
 FMT_TYPE = 128
 FMT_LENGTH = 89  # 3 header + Type(B) Length(B) Name(n) Format(N) Columns(Z)
+TEXT_CHARS = "nNZ"
+TEXT_COLUMNS = frozenset(
+    # every text column seen in real ArduPilot logs (Copter, Plane 4.x)
+    {"Message", "Name", "Label", "FileName", "Data", "TN", "nam", "FWS", "cal", "dst", "payload"}
+    | {"MultIds", "UnitIds"}
+)
 
 # Format character -> (numpy type, scale applied after decoding, or None).
 FORMAT_CHARS: dict[str, tuple[str, float | None]] = {
@@ -134,8 +140,8 @@ class DataFlashLog:
 
     def text(self, name: str, column: str) -> list[str]:
         cols = self.messages.get(name)
-        if cols is None or column not in cols:
-            return []
+        if cols is None or column not in cols or cols[column].dtype.kind != "S":
+            return []  # missing, or a damaged FMT declared the text column as a number
         return [decode(b) for b in cols[column].tolist()]
 
 
@@ -244,7 +250,32 @@ def read(path: Path, wanted: set[str] | None = None) -> DataFlashLog:
         starts = np.frombuffer(offs, dtype=np.uint64).astype(np.int64) + 3
         rows = buf[starts[:, None] + np.arange(dtype.itemsize)]
         table = rows.view(dtype).reshape(-1)
-        log.messages[fmt.name] = _columns(fmt, table)
+        # A number column declared as text, or a text column declared as a
+        # number: the FMT definition is damaged and the values are nonsense
+        # (and would break arithmetic or text handling downstream).
+        mistyped = [
+            c
+            for c, ch in zip(fmt.columns, fmt.format, strict=False)
+            if (ch in TEXT_CHARS) != (c in TEXT_COLUMNS)
+        ]
+        if mistyped:
+            log.issues.append(
+                ParseIssue(
+                    "invalid_values",
+                    f"{fmt.name}: damaged format (column {mistyped[0]} has the wrong type); "
+                    "ignored",
+                )
+            )
+            continue
+        cols = _columns(fmt, table)
+        if "TimeUS" not in cols:
+            # Every decoded type is placed in time; without a timestamp column
+            # (a damaged FMT definition) its rows cannot be used.
+            log.issues.append(
+                ParseIssue("invalid_values", f"{fmt.name}: no timestamp column; ignored")
+            )
+            continue
+        log.messages[fmt.name] = cols
 
     _set_time_range(log)
     return log

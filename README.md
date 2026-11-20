@@ -140,13 +140,14 @@ Drop the file in `src/flightlens/checks/`; it is discovered automatically. Add s
 ## Development
 
 ```bash
-uv run pytest                                   # 208 tests (FLIGHTLENS_SLOW=1 adds a 100 MB test)
+uv run pytest                                   # 219 tests (FLIGHTLENS_SLOW=1 adds a 100 MB test)
 uv run ruff check . && uv run ruff format --check . && uv run mypy
 cd web && npm run dev                           # UI with hot reload; run `uv run flightlens serve` alongside
 uv run python scripts/fetch_px4_logs.py --count 20   # public test logs into testdata/real/
 uv run flightlens batch testdata/real
 uv run python scripts/benchmark.py              # regenerate docs/validation.md
 uv run flightlens validate private-logs         # your own labelled logs (gitignored)
+uv run python scripts/fuzz.py --iterations 20000 # long fuzz campaign against both parsers
 ```
 
 ## Documentation and releases

@@ -135,6 +135,23 @@ become expected findings, false alarms become `must_not` rules. Run
 `flightlens validate` on that file after an upgrade to see where the new
 version disagrees with your engineers.
 
+## Robustness
+
+A flight log is untrusted input: it may be truncated by a crash, damaged on an
+SD card, or crafted on purpose. For any file, the parsers either read it or
+refuse it with a clear message; they never crash and never hang. This is
+checked by fuzzing: valid logs are damaged in the ways real files get damaged
+(cut off, bit flips, zeroed, duplicated or inserted blocks, corrupted message
+definitions), and every damaged copy must be read or refused cleanly, with no
+check crashing on what was read. A short version runs on every change
+(`tests/test_fuzz.py`), a long campaign weekly (`scripts/fuzz.py`); each input
+that ever broke a parser is kept as a regression test.
+
+What survives damage is reported, not hidden: a skipped message type, a topic
+without timestamps or an unreadable parameter appears under *Data &
+provenance*. The web server also parses every upload in a separate process with
+a time limit, so even an unknown failure cannot take it down.
+
 ## Storage
 
 | What | Where |

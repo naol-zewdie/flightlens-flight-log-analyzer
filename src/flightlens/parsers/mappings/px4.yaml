@@ -15,7 +15,7 @@
 # Signals that need computation (attitude angles from quaternions, motors,
 # vibration across IMUs, arming segments, events) are built in ulog.py.
 
-version: "px4-2026.11.2"
+version: "px4-2026.11.3"
 
 signals:
   # Battery
@@ -193,6 +193,8 @@ signals:
 # Topics read by the computed signals in ulog.py.
 computed_topics:
   - vehicle_attitude
+  - sensor_gyro_fifo   # raw gyro at sensor rate (high-rate logging profile)
+  - sensor_combined    # gyro at about 200 Hz, fallback for the spectrum
   - vehicle_attitude_setpoint
   - vehicle_imu_status
   - actuator_motors

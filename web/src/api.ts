@@ -26,6 +26,8 @@ export interface FlightRow {
 
 export interface Summary {
   duration_s: number | null;
+  airborne_s: number | null;
+  sorties: { start: number; end: number }[];
   distance_m: number | null;
   max_altitude_m: number | null;
   max_speed_m_s: number | null;
@@ -112,6 +114,24 @@ export interface Job {
   error: string | null;
 }
 
+export interface Spectrum {
+  source: string;
+  fs: number;
+  air_s: number;
+  freqs: number[];
+  psd_db: Record<"x" | "y" | "z", number[]>;
+  peak_hz: number | null;
+  peak_db: number;
+  peak_rms: number;
+  peak_axis: string | null;
+  harmonics: number[];
+  tracking: [number, number][];
+  tracks_throttle: boolean | null;
+  hover_throttle: number | null;
+  hover_hz: number | null;
+  spectrogram: { t: number[]; f: number[]; db: (number | null)[][] };
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -145,6 +165,7 @@ export const api = {
   events: (id: string) =>
     call<{ events: FlightEvent[]; segments: { start: number; end: number }[] }>(`/flights/${id}/events`),
   track: (id: string) => call<Track>(`/flights/${id}/track`),
+  spectrum: (id: string) => call<{ spectrum: Spectrum | null }>(`/flights/${id}/spectrum`),
   signals: (id: string, names: string[], range?: [number, number], maxPoints = 2000) => {
     const p = new URLSearchParams({ names: names.join(","), max_points: String(maxPoints) });
     if (range) {
@@ -156,13 +177,71 @@ export const api = {
   job: (id: string) => call<Job>(`/jobs/${id}`),
   remove: (id: string) => call<{ deleted: string }>(`/flights/${id}`, { method: "DELETE" }),
   reanalyze: (id: string) => call<{ job_id: string }>(`/flights/${id}/reanalyze`, { method: "POST" }),
-  setAircraft: (id: string, aircraft: string) =>
-    call<{ flight: FlightRow }>(`/flights/${id}`, {
+  setAircraft: (id: string, aircraft: string, sameBoard = false) =>
+    call<{ flight: FlightRow; updated: number }>(`/flights/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ aircraft }),
+      body: JSON.stringify({ aircraft, same_board: sameBoard }),
     }),
+  aircraft: () => call<{ aircraft: AircraftSummary[]; unassigned: number; stale: number }>("/aircraft"),
+  aircraftDetail: (key: string) => call<AircraftDetail>(`/aircraft/${encodeURIComponent(key)}`),
+  reanalyzeStale: () => call<{ queued: number }>("/reanalyze-stale", { method: "POST" }),
 };
+
+export interface DriftAlert {
+  metric: string;
+  title: string;
+  text: string;
+  flight_id: string;
+  value: number;
+  baseline: number;
+}
+
+export interface AircraftSummary {
+  key: string;
+  label: string | null;
+  serials: string[];
+  hardware: string | null;
+  vehicle_type: string | null;
+  flights: number;
+  first: string | null;
+  last: string | null;
+  latest_verdict: Verdict | null;
+  latest_score: number | null;
+  airborne_min: number;
+  alerts: DriftAlert[];
+}
+
+export interface TrendPoint {
+  flight_id: string;
+  when: string | null;
+  value: number;
+  baseline: number | null;
+  flagged: boolean;
+}
+
+export interface MetricSeries {
+  key: string;
+  label: string;
+  unit: string;
+  worse: number;
+  meaning: string;
+  points: TrendPoint[];
+}
+
+export interface AircraftDetail extends AircraftSummary {
+  metrics: MetricSeries[];
+  flight_list: {
+    id: string;
+    filename: string;
+    start_time: string | null;
+    uploaded_at: number;
+    verdict: Verdict | null;
+    score: number | null;
+    firmware: string | null;
+    serial: string | null;
+  }[];
+}
 
 /** Upload with progress. Resolves with the API's response body. */
 export function uploadLog(

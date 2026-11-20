@@ -8,6 +8,7 @@ passes.
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -15,6 +16,7 @@ from typing import Any
 
 from flightlens import __version__
 from flightlens.checks.base import Check, all_checks, alternative_signals
+from flightlens.intervals import format_time
 from flightlens.model import Finding, Flight, Severity
 from flightlens.summary import summarize
 
@@ -25,6 +27,14 @@ MIN_FLIGHT_S = 10.0
 MIN_CHECKS_FOR_HEALTHY = 3
 """A Healthy verdict needs at least this many checks that actually ran.
 One passing check is not evidence that the aircraft is healthy."""
+OUTCOME_CHECKS = ("flight.crash",)
+"""Findings that describe an outcome; other findings just before them are linked
+as likely contributing factors."""
+CAUSE_WINDOW_S = 20.0
+"""At least this far back; normally back to the takeoff of the same sortie."""
+FIRST_IN_SEVERITY = ("flight.crash", "flight.takeoff", "events.failsafes")
+"""Within a severity, outcomes and what the flight controller itself flagged come
+first: they say what happened, the rest says why."""
 
 
 class Verdict(StrEnum):
@@ -61,14 +71,14 @@ class Report:
     findings: list[Finding] = field(init=False)
 
     def __post_init__(self) -> None:
-        all_findings = [f for r in self.results for f in r.findings]
+        all_findings = _link_causes([f for r in self.results for f in r.findings], self.flight)
         self.findings = sorted(
             all_findings,
             key=lambda f: (
                 -f.severity.rank,
-                # Within a severity, what the flight controller itself flagged
-                # (failsafes, failure detector) comes first: it is usually the cause.
-                0 if f.check_id == "events.failsafes" else 1,
+                FIRST_IN_SEVERITY.index(f.check_id)
+                if f.check_id in FIRST_IN_SEVERITY
+                else len(FIRST_IN_SEVERITY),
                 f.start if f.start is not None else float("inf"),
             ),
         )
@@ -82,6 +92,9 @@ class Report:
 
     @property
     def verdict(self) -> Verdict:
+        if self.flight.never_armed:
+            # Findings may explain why (arming refused), but there was no flight to judge.
+            return Verdict.INSUFFICIENT_DATA
         v = verdict_for(self.findings)
         if v is Verdict.HEALTHY:
             # Armed time if the log records arming, otherwise the whole log.
@@ -109,6 +122,7 @@ class Report:
                 "vehicle_type": md.vehicle_type,
                 "firmware": md.firmware,
                 "hardware": md.hardware,
+                "serial": md.serial,
                 "start_time": md.start_time.isoformat() if md.start_time else None,
                 "log_duration_s": md.log_duration,
                 "mapping_version": md.mapping_version,
@@ -130,6 +144,59 @@ class Report:
             ],
             "findings": [f.to_dict() for f in self.findings],
         }
+
+
+def _sortie_start(flight: Flight, t: float) -> float:
+    """Takeoff time of the sortie that contains ``t`` (or its armed period's start)."""
+    from flightlens.checks._util import takeoff_times
+
+    starts = [s.start for s in flight.segments if s.start <= t]
+    starts += [x for x in takeoff_times(flight) if x <= t]
+    return max(starts, default=0.0)
+
+
+def _link_causes(findings: list[Finding], flight: Flight) -> list[Finding]:
+    """Attach what went wrong earlier in the same sortie to an outcome (a crash).
+
+    Timed findings between the sortie's takeoff and the outcome are listed in
+    order; findings without a time window (e.g. out of trim) are standing
+    conditions of the whole flight and are listed too.
+    """
+    issues = [
+        f
+        for f in findings
+        if f.severity in (Severity.ATTENTION, Severity.PROBLEM) and f.check_id not in OUTCOME_CHECKS
+    ]
+    out = []
+    for f in findings:
+        if f.check_id in OUTCOME_CHECKS and f.severity is Severity.PROBLEM and f.start is not None:
+            end = f.end if f.end is not None else f.start
+            since = min(_sortie_start(flight, f.start), f.start - CAUSE_WINDOW_S)
+            timed = sorted(
+                (
+                    c
+                    for c in issues
+                    if c.start is not None
+                    and c.start <= end
+                    and (c.end if c.end is not None else c.start) >= since
+                ),
+                key=lambda c: c.start or 0.0,
+            )
+            standing = [c for c in issues if c.start is None]
+            parts = []
+            if timed:
+                listed = "; ".join(f"{c.title} at {format_time(c.start or 0.0)}" for c in timed)
+                parts.append(f"Earlier in this flight: {listed}.")
+            if standing:
+                parts.append(f"Throughout: {'; '.join(c.title for c in standing)}.")
+            if parts:
+                f = dataclasses.replace(
+                    f,
+                    explanation=f"{f.explanation} {' '.join(parts)}",
+                    related=tuple(c.title for c in timed + standing),
+                )
+        out.append(f)
+    return out
 
 
 def health_score(findings: Iterable[Finding]) -> int:
@@ -193,7 +260,10 @@ def _run_one(check: Check, flight: Flight, overrides: Mapping[str, float]) -> Ch
                 check_id=check.id,
                 severity=Severity.NOT_EVALUATED,
                 title=f"{check.title} not evaluated",
-                explanation=f"The log has no {', '.join(missing)}.",
+                # a check may say what is missing in plain words, and how to log it
+                explanation=getattr(check, "missing_explanation", None)
+                or f"The log has no {', '.join(missing)}.",
+                recommendation=str(getattr(check, "missing_recommendation", "")),
                 evidence_signals=tuple(missing),
             )
         ]

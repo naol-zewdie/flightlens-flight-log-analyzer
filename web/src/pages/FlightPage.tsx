@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useOutletContext, useParams } from "react-router-dom";
+import { useReadOnly } from "../components/server";
 import { api, type Finding, type FlightEvent, type FlightRow, type Report, type Track } from "../api";
 import { SevIcon, VERDICT_LABEL, verdictClass } from "../components/Severity";
 import { fmtDate, fmtDuration, fmtNum } from "../format";
@@ -19,6 +20,7 @@ export interface FlightCtx {
 export const useFlight = () => useOutletContext<FlightCtx>();
 
 export function FlightPage() {
+  const readOnly = useReadOnly();
   const { id = "" } = useParams();
   const [flight, setFlight] = useState<FlightRow | null>(null);
   const [data, setData] = useState<Omit<FlightCtx, "cursor" | "setCursor" | "reload" | "flight"> | null>(null);
@@ -116,7 +118,7 @@ export function FlightPage() {
         <div className="card card-body" style={{ marginTop: 24 }}>
           <h2 className="sev sev-problem"><SevIcon severity="problem" /> This log could not be analyzed</h2>
           <p>{flight.error}</p>
-          <button className="btn" onClick={() => api.reanalyze(id).then(load)}>Try again</button>
+          {!readOnly && <button className="btn" onClick={() => api.reanalyze(id).then(load)}>Try again</button>}
         </div>
       ) : r && data ? (
         <>
@@ -124,6 +126,7 @@ export function FlightPage() {
           <nav className="tabs">
             <NavLink to="" end>Overview</NavLink>
             <NavLink to="signals">Signals</NavLink>
+            <NavLink to="spectrum">Noise spectrum</NavLink>
             <NavLink to="events">Events<span className="count">{data.events.length}</span></NavLink>
             <NavLink to="quality">
               Data &amp; provenance
@@ -150,7 +153,18 @@ function Stats({ report }: { report: Report }) {
   };
   return (
     <div className="stats">
-      <Stat k="Flight time" v={fmtDuration(s.duration_s)} />
+      <Stat
+        k="Time in the air"
+        v={s.airborne_s != null && s.sorties.length ? fmtDuration(s.airborne_s) : null}
+        unit={s.sorties.length > 1 ? `${s.sorties.length} sorties` : undefined}
+        why={
+          s.duration_s === 0
+            ? "Never armed"
+            : s.airborne_s != null
+              ? `Armed ${fmtDuration(s.duration_s)} but never left the ground`
+              : "No attitude or altitude data"
+        }
+      />
       <Stat k="Distance" v={s.distance_m != null ? (s.distance_m >= 1000 ? fmtNum(s.distance_m / 1000) : fmtNum(s.distance_m)) : null} unit={s.distance_m != null && s.distance_m >= 1000 ? "km" : "m"} why={why.distance} />
       <Stat k="Max altitude" v={fmtNumOrNull(s.max_altitude_m)} unit="m" why={why.alt} />
       <Stat k="Max speed" v={fmtNumOrNull(s.max_speed_m_s)} unit="m/s" why={why.speed} />

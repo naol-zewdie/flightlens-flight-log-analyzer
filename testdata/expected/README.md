@@ -1,2 +1,4 @@
-One YAML file per test log, describing the findings it must and must not produce.
-See [docs/sitl-log-library.md](../../docs/sitl-log-library.md) for the format.
+Validation manifests: YAML files that say which findings each log must and must
+not produce. Run them with `flightlens validate testdata/expected`.
+See [docs/sitl-log-library.md](../../docs/sitl-log-library.md) and the format in
+[src/flightlens/validate.py](../../src/flightlens/validate.py).

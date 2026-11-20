@@ -170,3 +170,32 @@ def test_lttb_keeps_extremes_and_gaps() -> None:
     assert tt.size == 500 and vv.max() == 10.0
     ts, vs = with_gaps(np.array([0.0, 1.0, 2.0, 10.0, 11.0]), np.array([1.0, 2.0, 3.0, 4.0, 5.0]))
     assert None in vs and len(ts) == 6
+
+
+def test_upload_ardupilot_bin(client: TestClient, tmp_path: Path) -> None:
+    from .test_ardupilot import copter_log
+
+    res = upload(client, copter_log(tmp_path / "00000042.BIN"))
+    assert wait(client, res["job_id"])["status"] == "done"
+    flight = client.get(f"/api/flights/{res['flight_id']}").json()["flight"]
+    assert flight["log_format"] == "dataflash"
+    assert flight["verdict"] == "healthy"
+    assert flight["firmware"].startswith("ArduCopter V4.5.7")
+    track = client.get(f"/api/flights/{res['flight_id']}/track").json()
+    assert len(track["lat"]) > 100
+
+
+def test_spectrum_endpoint(client: TestClient, tmp_path: Path) -> None:
+    from flightlens.sim.benchmark import Fault, copter
+
+    res = upload(client, copter(tmp_path / "noise.bin", Fault("gyro_noise", level=12.0), 7))
+    assert wait(client, res["job_id"])["status"] == "done"
+    spec = client.get(f"/api/flights/{res['flight_id']}/spectrum").json()["spectrum"]
+    assert spec["fs"] == 2000 and spec["tracks_throttle"] is True
+    assert len(spec["freqs"]) == len(spec["psd_db"]["x"])
+    grid = spec["spectrogram"]
+    assert len(grid["db"]) == len(grid["t"]) and len(grid["db"][0]) == len(grid["f"])
+
+    quiet = upload(client, LOG)  # never armed: no spectrum, but not an error
+    assert wait(client, quiet["job_id"])["status"] == "done"
+    assert client.get(f"/api/flights/{quiet['flight_id']}/spectrum").json() == {"spectrum": None}

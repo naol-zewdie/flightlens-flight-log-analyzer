@@ -181,13 +181,28 @@ function Evidence({ finding, flightId, cursor, onPick }: { finding: Finding; fli
         })),
     [data],
   );
-  const units = new Set(series.map((s) => s.unit));
-  // Draw the limit only when it is in the plotted signal's own unit.
+  // One chart per unit: a y axis is only meaningful for a single unit.
+  const groups = useMemo(() => {
+    const by = new Map<string, Series[]>();
+    for (const s of series) by.set(s.unit ?? "", [...(by.get(s.unit ?? "") ?? []), s]);
+    return [...by.entries()];
+  }, [series]);
+  // Draw the limit only on the chart whose unit it is in.
   const threshold =
-    finding.threshold != null && units.size === 1 && units.has(finding.unit)
+    finding.threshold != null
       ? { value: finding.threshold, label: `${finding.severity === "problem" ? "Problem" : "Attention"} limit ${fmtNum(finding.threshold)} ${finding.unit}`, color: sevColor(finding.severity) }
       : null;
   const win = finding.start != null ? { start: finding.start, end: finding.end ?? finding.start, color: sevColor(finding.severity) } : null;
+  const logEnd = report.source.log_duration_s ?? null;
+  // Open zoomed on the finding with context around it; double-click shows the whole log.
+  const focus = useMemo<[number, number] | null>(() => {
+    if (!win || logEnd == null) return null;
+    const dur = win.end - win.start;
+    const lo = Math.max(0, win.start - Math.max(20, dur * 0.5));
+    const hi = Math.min(logEnd, win.end + Math.max(5, dur * 0.5));
+    return hi - lo < 0.8 * logEnd ? [lo, hi] : null;
+  }, [win?.start, win?.end, logEnd]);
+  const domain = useMemo<[number, number] | null>(() => (logEnd != null ? [0, logEnd] : null), [logEnd]);
   const modeBands = useMemo(() => {
     const modes = events.filter((e) => e.kind === "mode");
     const end = report.source.log_duration_s ?? 0;
@@ -223,7 +238,23 @@ function Evidence({ finding, flightId, cursor, onPick }: { finding: Finding; fli
         {names.length > 0 ? (
           data ? (
             series.length ? (
-              <Chart series={series} window={win} threshold={threshold} bands={modeBands} marker={cursor} onPick={onPick} height={230} />
+              groups.map(([unit, list]) => (
+                <div key={unit}>
+                  {groups.length > 1 && <div className="eyebrow" style={{ marginBottom: 2 }}>{unit || "no unit"}</div>}
+                  <Chart
+                    series={list}
+                    window={win}
+                    threshold={threshold && unit === finding.unit ? threshold : null}
+                    bands={modeBands}
+                    marker={cursor}
+                    onPick={onPick}
+                    xRange={focus}
+                    domain={domain}
+                    syncKey={`ev-${flightId}`}
+                    height={groups.length > 1 ? 150 : 230}
+                  />
+                </div>
+              ))
             ) : (
               <div className="empty">The evidence signals are not available.</div>
             )

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from flightlens.checks._util import armed_usable, grade
+from flightlens.checks._util import armed_usable, grade, impact_windows, outside
 from flightlens.checks.base import register
 from flightlens.model import CheckConfig, Finding, Flight, Severity
 
@@ -25,18 +25,19 @@ PLAUSIBLE_CELL_V = (2.5, 4.5)
 class BatterySag:
     id = "battery.sag"
     title = "Battery voltage"
-    version = "1.0.0"
+    version = "1.2.0"
     required_signals = ("bat.volt",)
     defaults = {"attention": 3.5, "problem": 3.3, "min_duration_s": 1.0}
 
     def run(self, flight: Flight, config: CheckConfig) -> list[Finding]:
         volt = flight.signal("bat.volt")
-        cells = _cell_count(flight)
+        cells = cell_count(flight)
         if cells is None:
             return [self._not_evaluated("The battery cell count is unknown.")]
 
         per_cell = volt.values / cells
-        usable = armed_usable(flight, volt)
+        # A crash or hard touchdown can briefly collapse the voltage; not a battery fault.
+        usable = armed_usable(flight, volt) & outside(volt.t, impact_windows(flight))
         if usable.sum() < 2:
             return [self._not_evaluated("No battery voltage samples while armed.")]
         median = float(np.median(per_cell[usable]))
@@ -80,6 +81,7 @@ class BatterySag:
                 explanation=(
                     f"The battery dropped to {b.worst:.2f} V per cell ({cells} cells) "
                     f"for {b.end - b.start:.0f} s while armed."
+                    + _resistance_text(flight, cells, usable)
                 ),
                 recommendation=(
                     "Land earlier, check the battery's health and internal resistance, "
@@ -107,7 +109,36 @@ class BatterySag:
         )
 
 
-def _cell_count(flight: Flight) -> int | None:
+def internal_resistance(flight: Flight, usable: np.ndarray) -> tuple[float, float] | None:
+    """(pack resistance in mΩ, highest current in A) from a least-squares fit of
+    voltage against current; None without a real spread of current."""
+    if "bat.curr" not in flight.signals:
+        return None
+    volt = flight.signal("bat.volt")
+    curr = np.interp(volt.t, flight.signal("bat.curr").t, flight.signal("bat.curr").values)
+    sel = usable & np.isfinite(curr) & np.isfinite(volt.values)
+    if sel.sum() < 20 or np.ptp(curr[sel]) < 10:
+        return None
+    r_mohm = -float(np.polyfit(curr[sel], volt.values[sel], 1)[0]) * 1000
+    if r_mohm <= 0:
+        return None
+    return r_mohm, float(np.nanmax(curr[sel]))
+
+
+def _resistance_text(flight: Flight, cells: int, usable: np.ndarray) -> str:
+    fit = internal_resistance(flight, usable)
+    if fit is None:
+        return ""
+    r_mohm, i_max = fit
+    return (
+        f" Voltage fell about {r_mohm / 1000 * i_max:.1f} V at {i_max:.0f} A: an internal "
+        f"resistance of about {r_mohm:.0f} mΩ ({r_mohm / cells:.0f} mΩ per cell). A healthy "
+        "pack is typically under 5 mΩ per cell; much higher means a worn or undersized "
+        "battery, or poor connectors."
+    )
+
+
+def cell_count(flight: Flight) -> int | None:
     if "bat.cells" in flight.signals:
         vals = flight.signals["bat.cells"].values
         vals = vals[np.isfinite(vals) & (vals > 0)]

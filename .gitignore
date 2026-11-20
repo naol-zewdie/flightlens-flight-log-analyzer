@@ -25,3 +25,15 @@ testdata/real/
 data/
 web/dist/
 *.tsbuildinfo
+
+# generated benchmark and SITL campaign logs (regenerate, never commit)
+sitl-logs/
+testdata/sitl/
+bench-logs/
+
+# web UI bundled into the wheel by scripts/build_dist.py
+src/flightlens/web/
+flightlens-demo/
+
+# docs site build output
+site/

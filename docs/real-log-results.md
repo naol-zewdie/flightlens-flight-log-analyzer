@@ -51,3 +51,81 @@ These are honest gaps in the logs, not parser errors. The verdict never treats t
 - No labelled ground truth: the assessments above are engineering judgement from the data, not confirmed by the pilots.
 - The thresholds are community starting values tuned on 28 logs; they are not approved for any specific aircraft.
 - Injected-fault SITL logs (see [sitl-log-library.md](sitl-log-library.md)) are still needed for the detection-rate target (≥ 90%).
+
+## ArduPilot `.bin`: 15 real ArduPlane logs
+
+Owner's own 6S fixed wing, ArduPlane V4.6.2 (logs not committed). Owner's account:
+runway takeoff, a short flight, the aircraft banks to one side and crashes; a
+tuning/control problem.
+
+**Before calibration** 13 of 15 were PROBLEM, mostly for the wrong reasons:
+"poor yaw tracking" (ArduPlane logs no yaw setpoint, `DesYaw` = 0) and
+"vibration too high" from single impact spikes (80–104 m/s² for a fraction of
+a second at touchdown or crash).
+
+**Changes made from these logs:**
+
+1. Airborne time from `STAT.isFlying`; arming from `STAT.Armed` when ARM/EV
+   records are missing (one log had none).
+2. Yaw never tracked on fixed wing; an axis whose setpoint never changes is skipped.
+3. ArduPilot vibration must hold 3 s in the air; impact spikes are excluded from
+   vibration, clipping and battery checks and handled by a new crash check.
+4. New checks: crash or hard landing (with the earlier findings of the same flight
+   linked as likely causes), attitude beyond the configured limit, control surface
+   at full travel, out of trim.
+5. The battery finding estimates internal resistance from voltage against current.
+
+**Result:**
+
+| | Logs |
+|---|---|
+| Crash detected (impact at the end of the flight, then upset, rest on its side, or log cut off) | 6 |
+| Hard landing (impact, upright) | 2 |
+| Never airborne / no flight | 2 |
+| False "yaw tracking" or single-spike "vibration" Problems | 0 (was 13) |
+
+The clearest crash reads: *Crash at 08:10, came to rest at 99° roll, log ends 2 s
+later. Earlier in this flight: battery sagged (06:16), bank beyond the 45° limit
+for 19 s (06:28), aileron at full travel (07:53). Throughout: out of trim, 19% left
+aileron needed to fly level.* Across the flights the battery fell to about 2.9–3.1
+V per cell at 60–79 A, an internal resistance of about 15 mΩ per cell, several
+times a healthy pack: likely a contributing factor.
+
+These are labels from the owner's account and the data, not an independent
+investigation. They are kept as regression tests (`tests/test_real_logs.py` with
+labels in the gitignored `private-logs/`).
+
+## PX4 SITL: 8 attempted flights that never flew
+
+PX4 v1.17 SITL sessions where the owner tried to fly normally. Before: 5
+"insufficient data" with no reason, 3 with "motor at full power / motor works less
+/ poor roll tracking" recorded while the vehicle sat on the ground.
+
+After: 4 of the 5 never-armed logs say why (**"Arming was refused: height estimate
+not stable"**; the fifth logged no reason), and the 3 others say **"Takeoff failed:
+Takeoff mode engaged but the altitude never changed by 1 m"**, with the motor and
+attitude symptoms suppressed because the aircraft was never in the air.
+
+## Effect on the 28 PX4 logs
+
+Only one result changed: the known crash (`69531256`) is now also reported as a
+Crash, with the bank beyond its configured limit linked as a cause.
+
+## Gyro noise spectrum (`vibration.spectrum`)
+
+Calibrated on the 28 PX4 logs; thresholds are FlightLens defaults (a peak 15 dB
+over the band and still 1 deg/s RMS after the configured gyro low-pass), not
+community limits. The check never reports a Problem: filter setup is advice.
+
+| Gyro data in the log | Logs | Result |
+|---|---|---|
+| Raw FIFO, 1 to 8 kHz | 5 | 2 Attention (VTOLs with the gyro low-pass off and the notch at 9 to 20 Hz, noise at 87 Hz); 2 covered by a notch (dynamic, or fixed at 80 Hz); 1 too short |
+| `sensor_combined`, about 200 Hz | 17 | 2 Attention (83 Hz, and a 64 deg/s peak at 57 Hz on yaw), 3 strong peaks the low-pass already removes, 10 with no dominant peak, 2 below 180 Hz (not evaluated) |
+| none usable | 6 | not evaluated, with how to enable high-rate logging |
+
+Only one verdict changed: `2d145d43` from healthy to Attention, an 83 Hz peak
+seen in 222 Hz data. The finding says the frequency may be an alias and asks
+for raw gyro logging before a notch is set. The 15 ArduPlane logs have no
+high-rate gyro (IMU at 25 to 50 Hz, no batch sampler), so the check explains how
+to log it; the ArduPilot paths (batch sampler and `GYR`) are verified on
+generated logs only.

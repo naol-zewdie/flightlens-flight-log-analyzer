@@ -40,3 +40,9 @@ def test_sha256_matches_hashlib(tmp_path: Path) -> None:
     data = b"flightlens" * 300_000
     p = write(tmp_path, "big.bin", data)
     assert parsers.file_sha256(p, chunk_size=4096) == hashlib.sha256(data).hexdigest()
+
+
+def test_damaged_dataflash_is_a_parse_error_not_a_crash(tmp_path: Path) -> None:
+    p = write(tmp_path, "00000042.BIN", b"\xa3\x95\x80" + b"\0" * 16)
+    with pytest.raises(parsers.ParseError):
+        parsers.load(p)

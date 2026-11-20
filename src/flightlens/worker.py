@@ -29,7 +29,9 @@ def process_log(log_path: str, out_dir: str) -> dict[str, Any]:
 
     from flightlens import parsers
     from flightlens.engine import analyze
+    from flightlens.metrics import flight_metrics
     from flightlens.model import Severity
+    from flightlens.spectrum import analyze_spectrum
 
     flight = parsers.load(Path(log_path))
     report = analyze(flight)
@@ -60,6 +62,11 @@ def process_log(log_path: str, out_dir: str) -> dict[str, Any]:
     ]
     data["segments"] = [{"start": s.start, "end": s.end} for s in flight.segments]
     (tmp / "report.json").write_text(json.dumps(_clean(data), allow_nan=False), encoding="utf-8")
+    spec = analyze_spectrum(flight)
+    if spec is not None:
+        (tmp / "spectrum.json").write_text(
+            json.dumps(_clean(spec.to_dict()), allow_nan=False), encoding="utf-8"
+        )
 
     # Swap in the new results: the old folder is renamed aside (fast, and works
     # on Windows even if a reader has just opened a file), then removed.
@@ -77,6 +84,8 @@ def process_log(log_path: str, out_dir: str) -> dict[str, Any]:
         "firmware": md.firmware,
         "vehicle_type": md.vehicle_type,
         "hardware": md.hardware,
+        "serial": md.serial,
+        "metrics": flight_metrics(flight, report),
         "start_time": md.start_time.isoformat() if md.start_time else None,
         "duration_s": data["summary"]["duration_s"],
         "verdict": report.verdict.value,

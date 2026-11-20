@@ -1,10 +1,25 @@
 [project]
 name = "flightlens"
-version = "0.1.0"
+version = "0.2.0"
 description = "Automatic drone flight log analysis: a health verdict, ranked findings and the evidence behind them."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.12"
+authors = [{ name = "Naol Zewdie" }]
+keywords = ["drone", "uav", "px4", "ardupilot", "flight-log", "ulog", "dataflash", "diagnostics"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Typing :: Typed",
+]
 dependencies = [
     "numpy>=1.26",
     "typer>=0.12",
@@ -30,6 +45,7 @@ dev = [
     "httpx>=0.28.1",
     "playwright>=1.65.0",
 ]
+docs = ["mkdocs-material>=9.5"]
 
 [build-system]
 requires = ["hatchling"]
@@ -37,6 +53,12 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/flightlens"]
+# The built web UI is copied here by scripts/build_dist.py; it is gitignored,
+# so it must be listed as an artifact to be packaged.
+artifacts = ["src/flightlens/web"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["testdata/real", "private-logs", "data", "web/node_modules", "web/dist"]
 
 [tool.ruff]
 line-length = 100

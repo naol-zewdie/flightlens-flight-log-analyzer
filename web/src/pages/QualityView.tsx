@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { SevLabel } from "../components/Severity";
 import { fmtBytes, fmtTime } from "../format";
+import { useReadOnly } from "../components/server";
 import { useFlight } from "./FlightPage";
 
 export function QualityView() {
@@ -11,6 +12,7 @@ export function QualityView() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [label, setLabel] = useState(flight.aircraft ?? "");
   const [busy, setBusy] = useState(false);
+  const readOnly = useReadOnly();
   const reasons = new Map(findings.filter((f) => f.severity === "not_evaluated").map((f) => [f.check_id, f.explanation]));
   const src = report.source;
 
@@ -91,6 +93,7 @@ export function QualityView() {
             <a className="btn" href={`/api/flights/${flight.id}/original`}>Original log</a>
           </div>
         </section>
+        {!readOnly && (
         <section className="card">
           <div className="card-head"><h2>Manage</h2></div>
           <div className="card-body" style={{ display: "grid", gap: 12 }}>
@@ -128,6 +131,7 @@ export function QualityView() {
             </div>
           </div>
         </section>
+        )}
       </div>
     </div>
   );

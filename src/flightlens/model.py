@@ -114,6 +114,10 @@ class FlightMetadata:
     vehicle_type: str | None = None
     firmware: str | None = None
     hardware: str | None = None
+    serial: str | None = None
+    """Unique id of the autopilot board (PX4 sys_uuid, ArduPilot board UID); groups
+    flights of one aircraft. Board swaps and placeholder ids exist, so it only
+    suggests the aircraft; a user's label wins."""
     start_time: datetime | None = None
     log_duration: float | None = None
     """Seconds from the first to the last timestamp in the log."""
@@ -200,6 +204,8 @@ class Finding:
     start: float | None = None
     end: float | None = None
     evidence_signals: tuple[str, ...] = ()
+    related: tuple[str, ...] = ()
+    """Other findings this one is linked to, e.g. likely causes of a crash."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -215,6 +221,7 @@ class Finding:
             "start": self.start,
             "end": self.end,
             "evidence_signals": list(self.evidence_signals),
+            "related": list(self.related),
         }
 
 

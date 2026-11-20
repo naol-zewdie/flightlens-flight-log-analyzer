@@ -14,25 +14,38 @@ Logs larger than a few MB should not go in git; keep them in a release asset or 
 
 **Confidentiality:** only simulated logs, public logs whose terms allow reuse, and logs you own. Never commit company logs, aircraft identifiers or real locations.
 
-## Expected findings file
+## Labels: the validation manifest
 
-`testdata/expected/<log-name>.yaml`:
+One manifest per set of logs, for example `testdata/expected/sitl-copter.yaml`:
 
 ```yaml
-log: copter-vibration-z.bin
-source: ArduPilot SITL, Copter 4.x            # how it was produced
-injection: SIM_VIB_MOT_MAX=... from 120 s      # what was injected
-verdict: problem                               # healthy | attention | problem
-findings:
-  - check: vibration.level
-    severity: problem
-    window: [120, 180]                         # seconds, approximate
-    tolerance_s: 10
-must_not_contain:                              # checks that must stay quiet
-  - gps.quality
+source: ArduPilot SITL, Copter 4.6
+logs_dir: ../sitl                              # relative to this file
+defaults:
+  exhaustive: true                             # any other Attention/Problem is a false alarm
+logs:
+  copter-vibration-z.bin:
+    fault: vibration                           # groups the results table
+    verdict: problem                           # healthy | attention | problem | insufficient data
+    expect:
+      - {check: vibration.level, severity: problem, window: [120, 180], tolerance_s: 10}
+    allow: [imu.clipping]                      # may fire, never counted
+    must_not: [gps.quality]                    # must stay quiet
+  copter-healthy.bin:
+    fault: healthy
+    verdict: healthy
 ```
 
-For a healthy baseline, use `verdict: healthy` with an empty `findings` list.
+`expect` entries can be short (`vibration.level:problem`, or `vibration.level`
+for any Attention or Problem). Score a manifest or a folder of them with
+`flightlens validate <path> [--markdown out.md] [--json out.json]`; it exits 1
+if any log is not fully correct.
+
+**Automated:** `scripts/sitl_campaign.py --ardupilot ~/ardupilot --out sitl-logs`
+flies ArduCopter SITL once per fault (healthy, vibration, accelerometer noise,
+GPS loss, few satellites, weak motor, low battery, radio failsafe) and writes
+the logs plus `campaign.yaml`. It needs Linux or WSL, a built SITL
+(`./waf configure --board sitl && ./waf copter`) and `pip install pymavlink`.
 
 ## Recording ArduPilot SITL logs
 

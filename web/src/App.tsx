@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom";
+import { useReadOnly } from "./components/server";
 import { getThemeChoice, setThemeChoice, type ThemeChoice } from "./components/theme";
+import { AircraftList, AircraftPage } from "./pages/Aircraft";
 import { Library } from "./pages/Library";
 import { FlightPage } from "./pages/FlightPage";
 import { Overview } from "./pages/Overview";
 import { SignalsView } from "./pages/SignalsView";
+import { SpectrumView } from "./pages/SpectrumView";
 import { EventsView } from "./pages/EventsView";
 import { QualityView } from "./pages/QualityView";
 
@@ -14,9 +17,12 @@ export function App() {
       <TopBar />
       <Routes>
         <Route path="/" element={<Library />} />
+        <Route path="/aircraft" element={<AircraftList />} />
+        <Route path="/aircraft/:key" element={<AircraftPage />} />
         <Route path="/flights/:id" element={<FlightPage />}>
           <Route index element={<Overview />} />
           <Route path="signals" element={<SignalsView />} />
+          <Route path="spectrum" element={<SpectrumView />} />
           <Route path="events" element={<EventsView />} />
           <Route path="quality" element={<QualityView />} />
         </Route>
@@ -28,6 +34,7 @@ export function App() {
 
 function TopBar() {
   const [theme, setTheme] = useState<ThemeChoice>(getThemeChoice);
+  const readOnly = useReadOnly();
   const choose = (t: ThemeChoice) => {
     setThemeChoice(t);
     setTheme(t);
@@ -45,8 +52,12 @@ function TopBar() {
         <NavLink to="/" end>
           Flights
         </NavLink>
+        <NavLink to="/aircraft">Aircraft</NavLink>
       </nav>
       <div className="spacer" />
+      {readOnly && (
+        <span className="chip" title="Uploads, edits and deletes are turned off on this server">Read-only demo</span>
+      )}
       <div className="segmented" role="group" aria-label="Theme">
         {(["system", "light", "dark"] as const).map((t) => (
           <button key={t} aria-pressed={theme === t} onClick={() => choose(t)}>

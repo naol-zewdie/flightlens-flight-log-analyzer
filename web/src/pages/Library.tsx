@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, uploadLog, type FlightRow, type Verdict } from "../api";
+import { useReadOnly } from "../components/server";
 import { VerdictPill } from "../components/Severity";
 import { fmtDate, fmtDuration, plural } from "../format";
 
@@ -24,6 +25,7 @@ const FILTERS: { label: string; value: Verdict | "" }[] = [
 const ACCEPT = ".ulg,.bin,.tlog";
 
 export function Library() {
+  const readOnly = useReadOnly();
   const [flights, setFlights] = useState<FlightRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
@@ -91,8 +93,9 @@ export function Library() {
     return () => clearInterval(id);
   }, [uploads, load]);
 
-  // Drop anywhere on the page.
+  // Drop anywhere on the page (not on a read-only demo).
   useEffect(() => {
+    if (readOnly) return;
     let depth = 0;
     const enter = (e: DragEvent) => {
       if (!e.dataTransfer?.types.includes("Files")) return;
@@ -120,9 +123,9 @@ export function Library() {
       window.removeEventListener("dragover", over);
       window.removeEventListener("drop", drop);
     };
-  }, [start]);
+  }, [start, readOnly]);
 
-  const isEmpty = flights !== null && flights.length === 0 && !q && !verdict && uploads.length === 0;
+  const isEmpty = !readOnly && flights !== null && flights.length === 0 && !q && !verdict && uploads.length === 0;
 
   return (
     <main className="page">
@@ -146,18 +149,20 @@ export function Library() {
             {verdict || q ? " matching" : " analyzed"}
           </div>
         </div>
+        {!readOnly && (
         <button className="btn primary" onClick={() => input.current?.click()}>
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
             <path d="M8 11V2.5M4.5 6L8 2.5 11.5 6M2.5 13.5h11" />
           </svg>
           Upload logs
         </button>
+        )}
       </div>
 
       {isEmpty ? (
         <button className="dropzone big" style={{ width: "100%" }} onClick={() => input.current?.click()}>
           <strong>Drop a flight log here</strong>
-          <span>PX4 .ulg files are supported. Analysis runs on this machine; nothing is sent anywhere.</span>
+          <span>PX4 .ulg and ArduPilot .bin logs are supported. Analysis runs on this machine; nothing is sent anywhere.</span>
           <span className="faint" style={{ marginTop: 8 }}>or click to browse</span>
         </button>
       ) : (
@@ -270,7 +275,7 @@ export function Library() {
             </table>
           </div>
           <div className="hint" style={{ marginTop: 10 }}>
-            Drop .ulg files anywhere on this page to add them.
+            Drop .ulg or .bin files anywhere on this page to add them.
           </div>
         </>
       )}

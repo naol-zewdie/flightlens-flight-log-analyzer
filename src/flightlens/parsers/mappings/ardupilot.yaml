@@ -1,0 +1,208 @@
+# ArduPilot DataFlash (.bin) -> FlightLens common signal vocabulary.
+#
+# Same schema as px4.yaml: `topic` is the DataFlash message name and `field`
+# its column. Each signal lists sources tried in order; later sources cover
+# older firmware. `instance` selects the sensor/core instance (the I, Inst,
+# IMU or C column); default 0. Scaled DataFlash types (c, e, L, ...) are
+# already converted to real units by the reader.
+#
+# Bump `version` whenever a mapping changes, so reports stay traceable.
+#
+# NOTE ON EKF RATIOS: XKF4/NKF4 SV, SP, SH and SM are innovation test ratios
+# where 1.0 means the measurement failed the consistency test, the same
+# meaning as PX4's estimator_status test ratios, so the estimator check's
+# 0.5 / 1.0 limits apply to both. Core 0 is used.
+#
+# Signals that need computation (vibration across IMUs, motors from
+# SERVOn_FUNCTION, arming segments, landed state, modes, events, battery cell
+# count) are built in ardupilot.py.
+
+version: "ardupilot-2026.11.3"
+
+signals:
+  # Attitude (deg)
+  - name: att.roll
+    unit: deg
+    sources: [{ topic: ATT, field: Roll }]
+  - name: att.pitch
+    unit: deg
+    sources: [{ topic: ATT, field: Pitch }]
+  - name: att.yaw
+    unit: deg
+    sources: [{ topic: ATT, field: Yaw }]
+  - name: att.des_roll
+    unit: deg
+    sources: [{ topic: ATT, field: DesRoll }]
+  - name: att.des_pitch
+    unit: deg
+    sources: [{ topic: ATT, field: DesPitch }]
+  - name: att.des_yaw
+    unit: deg
+    sources: [{ topic: ATT, field: DesYaw }]
+
+  # Angular rate (deg/s)
+  - name: rate.roll
+    unit: deg/s
+    sources: [{ topic: RATE, field: R }]
+  - name: rate.pitch
+    unit: deg/s
+    sources: [{ topic: RATE, field: P }]
+  - name: rate.yaw
+    unit: deg/s
+    sources: [{ topic: RATE, field: Y }]
+  - name: rate.des_roll
+    unit: deg/s
+    sources: [{ topic: RATE, field: RDes }]
+  - name: rate.des_pitch
+    unit: deg/s
+    sources: [{ topic: RATE, field: PDes }]
+  - name: rate.des_yaw
+    unit: deg/s
+    sources: [{ topic: RATE, field: YDes }]
+
+  # Battery (BAT since 3.6; CURR before)
+  - name: bat.volt
+    unit: V
+    sources:
+      - { topic: BAT, field: Volt, zero_is_missing: true }
+      - { topic: CURR, field: Volt, zero_is_missing: true }
+  - name: bat.curr
+    unit: A
+    sources:
+      - { topic: BAT, field: Curr, min_valid: 0 }
+      - { topic: CURR, field: Curr, min_valid: 0 }
+  - name: bat.used_mah
+    unit: mAh
+    sources:
+      - { topic: BAT, field: CurrTot, min_valid: 0 }
+      - { topic: CURR, field: CurrTot, min_valid: 0 }
+  - name: bat.remaining
+    unit: fraction
+    sources:
+      - { topic: BAT, field: RemPct, scale: 0.01, min_valid: 0, max_valid: 100 }
+
+  # GNSS receiver. Status: 0 no GPS, 1 no fix, 2 2D, 3 3D, 4 DGPS, 5 RTK float, 6 RTK fixed.
+  - name: gps.lat
+    unit: deg
+    sources: [{ topic: GPS, field: Lat, zero_is_missing: true }]
+  - name: gps.lon
+    unit: deg
+    sources:
+      - { topic: GPS, field: Lng, zero_is_missing: true }
+      - { topic: GPS, field: Lon, zero_is_missing: true }
+  - name: gps.alt
+    unit: m
+    sources: [{ topic: GPS, field: Alt }]
+  - name: gps.nsats
+    unit: count
+    sources: [{ topic: GPS, field: NSats }]
+  - name: gps.hdop
+    unit: ""
+    sources:
+      - { topic: GPS, field: HDop, min_valid: 0, max_valid: 99 }
+      - { topic: GPA, field: HDop, min_valid: 0, max_valid: 99 }
+  - name: gps.fix
+    unit: fix type
+    sources: [{ topic: GPS, field: Status }]
+  - name: gps.speed
+    unit: m/s
+    sources: [{ topic: GPS, field: Spd }]
+
+  # Estimated position and velocity (EKF3 XKF1, EKF2 NKF1)
+  - name: pos.lat
+    unit: deg
+    sources: [{ topic: POS, field: Lat, zero_is_missing: true }]
+  - name: pos.lon
+    unit: deg
+    sources: [{ topic: POS, field: Lng, zero_is_missing: true }]
+  - name: pos.alt
+    unit: m AMSL
+    sources: [{ topic: POS, field: Alt }]
+  - name: pos.rel_alt
+    unit: m
+    sources:
+      - { topic: POS, field: RelHomeAlt }
+      - { topic: POS, field: RelOriginAlt }
+  - name: pos.vx
+    unit: m/s
+    sources:
+      - { topic: XKF1, field: VN }
+      - { topic: NKF1, field: VN }
+  - name: pos.vy
+    unit: m/s
+    sources:
+      - { topic: XKF1, field: VE }
+      - { topic: NKF1, field: VE }
+  - name: pos.climb
+    unit: m/s
+    sources:
+      - { topic: XKF1, field: VD, scale: -1 }
+      - { topic: NKF1, field: VD, scale: -1 }
+
+  # Estimator innovation test ratios (1.0 = fail)
+  - name: ekf.vel
+    unit: ratio
+    sources:
+      - { topic: XKF4, field: SV, min_valid: 0 }
+      - { topic: NKF4, field: SV, min_valid: 0 }
+  - name: ekf.pos
+    unit: ratio
+    sources:
+      - { topic: XKF4, field: SP, min_valid: 0 }
+      - { topic: NKF4, field: SP, min_valid: 0 }
+  - name: ekf.hgt
+    unit: ratio
+    sources:
+      - { topic: XKF4, field: SH, min_valid: 0 }
+      - { topic: NKF4, field: SH, min_valid: 0 }
+  - name: ekf.mag
+    unit: ratio
+    sources:
+      - { topic: XKF4, field: SM, min_valid: 0 }
+      - { topic: NKF4, field: SM, min_valid: 0 }
+
+  # Control
+  - name: ctrl.thrust
+    unit: fraction
+    sources: [{ topic: CTUN, field: ThO }]
+
+  # Control surfaces and throttle as commanded (AETR, Plane): -1..1 and 0..1.
+  # Raw AETR values are -4500..4500 (centi-degrees of travel) and 0..100 %.
+  - name: ctrl.ail
+    unit: fraction
+    sources: [{ topic: AETR, field: Ail, scale: 2.2222222222e-4 }]
+  - name: ctrl.elev
+    unit: fraction
+    sources: [{ topic: AETR, field: Elev, scale: 2.2222222222e-4 }]
+  - name: ctrl.rud
+    unit: fraction
+    sources: [{ topic: AETR, field: Rudd, scale: 2.2222222222e-4 }]
+  - name: ctrl.thr
+    unit: fraction
+    sources: [{ topic: AETR, field: Thr, scale: 0.01 }]
+
+  # Power and radio
+  - name: power.5v
+    unit: V
+    sources: [{ topic: POWR, field: Vcc, zero_is_missing: true }]
+  - name: rc.rssi
+    unit: "%"
+    sources: [{ topic: RSSI, field: RXRSSI, scale: 100, min_valid: 0, max_valid: 1 }]
+
+# Messages read by the computed signals in ardupilot.py.
+computed_topics:
+  - VIBE
+  - GYR    # raw gyro at sensor rate (INS_RAW_LOG_OPT)
+  - ISBH   # batch sampler header (INS_LOG_BAT_MASK)
+  - ISBD   # batch sampler data
+  - RCOU
+  - RCO2
+  - ARM
+  - EV
+  - MODE
+  - ERR
+  - MSG
+  - PARM
+  - VER
+  - DSF
+  - STAT

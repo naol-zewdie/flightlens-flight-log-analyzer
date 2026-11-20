@@ -34,7 +34,7 @@ class EstimatorHealth:
     # so any one ratio is enough to run; the others are used when present.
     required_signals = ("ekf.hgt",)
     alternative_signals = (("ekf.vel",), ("ekf.pos",), ("ekf.mag",))
-    version = "1.1.0"
+    version = "1.2.0"
     defaults = {
         "attention": 0.5,
         "problem": 1.0,

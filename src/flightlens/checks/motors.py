@@ -3,7 +3,7 @@
 Signals: lift motors ``mot.1..N`` as fractions of full output (0-1). VTOL
 pushers are excluded by the parser.
 
-Saturation: total time any lift motor spends above 95% while armed.
+Saturation: total time any lift motor spends above 95% in the air.
 Attention > 1 s, Problem > 5 s. A saturated motor leaves no headroom for
 control, so attitude can no longer be held.
 
@@ -34,7 +34,7 @@ def _motor_matrix(flight: Flight) -> tuple[np.ndarray, np.ndarray] | None:
 class MotorSaturation:
     id = "motor.saturation"
     title = "Motor saturation"
-    version = "1.0.0"
+    version = "1.1.0"
     required_signals = ("mot.1", "mot.2")
     defaults = {"limit": 0.95, "attention_s": 1.0, "problem_s": 5.0}
 
@@ -43,9 +43,9 @@ class MotorSaturation:
         if m is None:
             return [_not_evaluated(self.id, "Motor outputs are missing or misaligned.")]
         t, out = m
-        armed = flight.armed_mask(t)
+        armed = in_air_mask(flight, t)
         if armed.sum() < 10:
-            return [_not_evaluated(self.id, "Too few motor samples while armed.")]
+            return [_not_evaluated(self.id, "Too few motor samples in the air.")]
 
         dt = float(np.median(np.diff(t))) if t.size > 1 else 0.0
         sat = armed & np.any(out > config["limit"], axis=1)
@@ -100,7 +100,7 @@ class MotorSaturation:
 class MotorImbalance:
     id = "motor.imbalance"
     title = "Motor balance"
-    version = "1.0.0"
+    version = "1.1.0"
     required_signals = ("mot.1", "mot.2", "mot.3", "rate.roll", "rate.pitch", "rate.yaw")
     defaults = {
         "attention": 0.10,

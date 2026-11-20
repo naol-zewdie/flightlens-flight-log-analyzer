@@ -19,7 +19,11 @@ EARTH_RADIUS_M = 6_371_000.0
 @dataclass(frozen=True)
 class FlightSummary:
     duration_s: float | None = None
-    """Armed time; the whole log if arming is unknown."""
+    """Armed time (0 if it never armed); the whole log if arming is unknown."""
+    airborne_s: float | None = None
+    """Time actually in the air (armed, not landed, and the altitude changed)."""
+    sorties: list[dict[str, float]] = field(default_factory=list)
+    """Each airborne period: ``{"start": s, "end": s}``."""
     distance_m: float | None = None
     max_altitude_m: float | None = None
     """Highest point above the take-off altitude."""
@@ -32,8 +36,11 @@ class FlightSummary:
 
 
 def summarize(flight: Flight) -> FlightSummary:
+    sorties = _sorties(flight)
     return FlightSummary(
         duration_s=_duration(flight),
+        airborne_s=sum(s["end"] - s["start"] for s in sorties) if sorties is not None else None,
+        sorties=sorties or [],
         distance_m=_distance(flight),
         max_altitude_m=_max_altitude(flight),
         max_speed_m_s=_max_speed(flight),
@@ -45,7 +52,27 @@ def summarize(flight: Flight) -> FlightSummary:
 def _duration(flight: Flight) -> float | None:
     if flight.segments:
         return sum(s.duration for s in flight.segments)
+    if flight.arming_known:
+        return 0.0
     return flight.metadata.log_duration
+
+
+def _sorties(flight: Flight) -> list[dict[str, float]] | None:
+    """Airborne periods, or None when the log has nothing to tell it from."""
+    from flightlens.checks._util import in_air_mask
+    from flightlens.intervals import intervals_where
+
+    base = next(
+        (flight.signals[n] for n in ("att.roll", "pos.rel_alt") if n in flight.signals), None
+    )
+    if base is None or base.t.size < 2:
+        return None
+    air = in_air_mask(flight, base.t)
+    return [
+        {"start": a, "end": b}
+        for a, b in intervals_where(base.t, air, merge_gap=5.0)
+        if b - a >= 2.0
+    ]
 
 
 def _armed(flight: Flight, name: str) -> tuple[np.ndarray, np.ndarray] | None:
@@ -109,12 +136,18 @@ def _battery_used(flight: Flight) -> float | None:
 
 
 def _modes(flight: Flight) -> list[str]:
+    """Modes active at any time while armed, in order of first use.
+
+    A mode counts from when it was selected until the next mode change, so one
+    chosen before arming and kept for the whole flight is included.
+    """
+    modes = [e for e in flight.events if e.kind is EventKind.MODE]
     seen: list[str] = []
-    for e in flight.events:
-        if e.kind is EventKind.MODE and e.text not in seen:
-            in_flight = not flight.segments or any(
-                s.start - 1 <= e.t <= s.end for s in flight.segments
-            )
-            if in_flight:
-                seen.append(e.text)
+    for i, e in enumerate(modes):
+        until = modes[i + 1].t if i + 1 < len(modes) else float("inf")
+        active = not flight.segments or any(
+            e.t <= s.end and until >= s.start for s in flight.segments
+        )
+        if active and e.text not in seen:
+            seen.append(e.text)
     return seen

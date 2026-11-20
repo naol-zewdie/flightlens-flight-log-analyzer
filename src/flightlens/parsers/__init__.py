@@ -1,7 +1,8 @@
 """Log format detection and loading.
 
-Each format gets its own adapter module that returns a :class:`Flight`.
-Adapters land in weeks 3-5 (ArduPilot .bin first, then PX4 .ulg; .tlog last).
+Each format has its own adapter module that returns a :class:`Flight`:
+``ulog`` (PX4 .ulg) and ``ardupilot`` (ArduPilot DataFlash .bin). MAVLink
+.tlog is not supported yet.
 """
 
 from __future__ import annotations
@@ -65,6 +66,13 @@ def load(path: Path) -> Flight:
         try:
             flight = ulog.parse(path)
         except ulog.ULogParseError as exc:
+            raise ParseError(str(exc)) from exc
+    elif fmt is LogFormat.DATAFLASH:
+        from flightlens.parsers import ardupilot
+
+        try:
+            flight = ardupilot.parse(path)
+        except ardupilot.DataFlashParseError as exc:
             raise ParseError(str(exc)) from exc
     else:
         raise ParseError(f"the {fmt.value} parser is not implemented yet")

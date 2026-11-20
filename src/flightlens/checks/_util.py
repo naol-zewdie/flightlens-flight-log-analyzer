@@ -42,12 +42,77 @@ def hold(sig: Signal, t: FloatArray) -> FloatArray:
     return out
 
 
+MIN_CLIMB_M = 1.0
+"""An armed period whose altitude never changes by this much never left the ground."""
+IMPACT_VIBE = 60.0
+"""ArduPilot VIBE level (m/s²) that, as a short burst, marks an impact, not vibration."""
+
+
+def airframe(flight: Flight) -> str:
+    """``fixed_wing``, ``vtol``, ``multirotor`` or ``other``, from the vehicle type."""
+    vt = (flight.metadata.vehicle_type or "").lower()
+    if "vtol" in vt:
+        return "vtol"
+    if "fixed wing" in vt or "plane" in vt:
+        return "fixed_wing"
+    if any(k in vt for k in ("rotor", "copter", "helicopter", "coaxial")):
+        return "multirotor"
+    return "other"
+
+
+def climbed(flight: Flight) -> list[bool]:
+    """For each armed segment, whether the aircraft actually left the ground.
+
+    Uses the altitude above the takeoff point. A land detector alone can be
+    fooled (for example a simulator whose vehicle never lifts off), so when the
+    altitude is known a segment must also climb at least ``MIN_CLIMB_M``.
+    Without altitude data every segment is assumed to have flown.
+    """
+    alt = flight.signals.get("pos.rel_alt")
+    if alt is None:
+        return [True] * len(flight.segments)
+    out = []
+    for seg in flight.segments:
+        sel = (alt.t >= seg.start) & (alt.t <= seg.end) & np.isfinite(alt.values)
+        vals = alt.values[sel]
+        out.append(bool(vals.size) and float(vals.max() - vals.min()) >= MIN_CLIMB_M)
+    return out
+
+
 def in_air_mask(flight: Flight, t: FloatArray) -> BoolArray:
-    """Armed and not landed. Uses the land detector when the log has it."""
+    """Armed, not landed, and in an armed period that actually left the ground."""
     mask = flight.armed_mask(t)
     if "state.landed" in flight.signals and len(flight.signals["state.landed"]):
         landed = hold(flight.signals["state.landed"], t)
         mask &= landed == 0
+    for seg, flew in zip(flight.segments, climbed(flight), strict=True):
+        if not flew:
+            mask &= ~((t >= seg.start) & (t <= seg.end))
+    return mask
+
+
+def impact_windows(
+    flight: Flight, pad_s: float = 2.0, max_len_s: float = 1.5
+) -> list[tuple[float, float]]:
+    """Short bursts of extreme vibration (touchdown, crash), padded by ``pad_s``.
+
+    Uses ArduPilot's per-axis VIBE; a burst longer than ``max_len_s`` is
+    sustained vibration, not an impact, and is not returned.
+    """
+    if not flight.has("vibe.x", "vibe.y", "vibe.z"):
+        return []
+    sx, sy, sz = (flight.signal(f"vibe.{a}") for a in "xyz")
+    if not (sx.t.shape == sy.t.shape == sz.t.shape):
+        return []
+    worst = np.fmax(np.fmax(sx.values, sy.values), sz.values)
+    bursts = intervals_where(sz.t, worst > IMPACT_VIBE, merge_gap=0.5)
+    return [(a - pad_s, b + pad_s) for a, b in bursts if b - a <= max_len_s]
+
+
+def outside(t: FloatArray, windows: list[tuple[float, float]]) -> BoolArray:
+    mask = np.ones(t.shape, dtype=np.bool_)
+    for a, b in windows:
+        mask &= ~((t >= a) & (t <= b))
     return mask
 
 

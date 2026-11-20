@@ -92,7 +92,8 @@ def test_builtin_checks_are_discovered_and_valid() -> None:
     for c in checks:
         assert isinstance(c, Check)
         assert c.version and c.defaults
-        assert c.required_signals or c.id == "events.failsafes"  # events need no signals
+        # Event-based checks read messages, not signals.
+        assert c.required_signals or c.id in ("events.failsafes", "preflight.arming")
         assert c.__doc__ or type(c).__module__, c.id
 
 

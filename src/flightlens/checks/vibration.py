@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from flightlens.checks._util import impact_windows, in_air_mask, outside
 from flightlens.checks.base import register
 from flightlens.intervals import intervals_where
 from flightlens.model import CheckConfig, Finding, Flight, Severity, Signal
@@ -33,20 +34,22 @@ _MERGE_GAP_S = 1.0
 class VibrationLevel:
     id = "vibration.level"
     title = "Vibration level"
-    version = "1.1.0"
+    version = "1.2.0"
     required_signals = ("vibe.x", "vibe.y", "vibe.z")
     alternative_signals = (("vibe.metric",),)
     defaults = {
         "attention": 30.0,
         "problem": 60.0,
-        "min_duration_s": 0.0,
+        "min_duration_s": 3.0,
         "px4_attention": 20.0,
         "px4_problem": 30.0,
         "px4_min_duration_s": 3.0,
     }
 
     def run(self, flight: Flight, config: CheckConfig) -> list[Finding]:
-        if flight.has(*self.required_signals):
+        ardupilot = flight.has(*self.required_signals)
+        impacts = impact_windows(flight) if ardupilot else []
+        if ardupilot:
             series = [(f"{a.upper()} axis", flight.signal(f"vibe.{a}")) for a in "xyz"]
             att, prob, min_dur = (
                 config["attention"],
@@ -65,7 +68,12 @@ class VibrationLevel:
         overall_peak = -np.inf
         evaluated = 0
         for label, sig in series:
-            usable = flight.armed_mask(sig.t) & np.isfinite(sig.values)
+            if ardupilot:
+                # In the air only, and not the short spikes of a touchdown or crash.
+                usable = in_air_mask(flight, sig.t) & outside(sig.t, impacts)
+            else:
+                usable = flight.armed_mask(sig.t)
+            usable &= np.isfinite(sig.values)
             # An all-zero metric means the firmware did not compute it.
             if not usable.any() or not np.any(sig.values[usable] > 0):
                 continue

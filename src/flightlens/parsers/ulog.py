@@ -15,12 +15,10 @@ Time is seconds since the log's first timestamp.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-import yaml
 from pyulog import ULog
 
 from flightlens.intervals import intervals_where
@@ -34,8 +32,14 @@ from flightlens.model import (
     Segment,
     Signal,
 )
+from flightlens.parsers._mapping import (
+    TopicKey,
+    apply_mapping,
+    arming_quality,
+    mapping_topics,
+)
+from flightlens.parsers._mapping import load_mapping as _load_mapping
 
-MAPPING_PATH = Path(__file__).parent / "mappings" / "px4.yaml"
 RAD2DEG = 180.0 / np.pi
 # vehicle_status.arming_state: 2 = ARMED in all versions; 3 = ARMED_ERROR (pre-1.9)
 ARMED_STATES = (2, 3)
@@ -105,7 +109,6 @@ EXPECTED_TOPICS: dict[str, tuple[str, ...]] = {
     "estimator status": ("estimator_status",),
 }
 
-TopicKey = tuple[str, int]
 TopicData = dict[str, Any]
 
 
@@ -113,16 +116,12 @@ class ULogParseError(Exception):
     pass
 
 
-@lru_cache(maxsize=1)
 def load_mapping() -> dict[str, Any]:
-    with MAPPING_PATH.open(encoding="utf-8") as fh:
-        data: dict[str, Any] = yaml.safe_load(fh)
-    return data
+    return _load_mapping("px4")
 
 
 def needed_topics(mapping: dict[str, Any]) -> list[str]:
-    topics = {src["topic"] for spec in mapping["signals"] for src in spec["sources"]}
-    topics.update(mapping.get("computed_topics", []))
+    topics = mapping_topics(mapping)
     for names in EXPECTED_TOPICS.values():
         topics.update(names)
     return sorted(topics)
@@ -164,26 +163,18 @@ def parse(path: Path) -> Flight:
         signals[name] = Signal(name=name, unit=unit, t=t, values=values, source=source)
 
     # 1. Table-driven signals.
-    for spec in mapping["signals"]:
-        for src in spec["sources"]:
-            key = (src["topic"], int(src.get("instance", 0)))
-            data = topics.get(key)
-            if data is None or src["field"] not in data:
-                continue
-            raw = data[src["field"]].astype(np.float64)
-            if src.get("zero_is_missing"):
-                raw = np.where(raw == 0, np.nan, raw)
-            if "min_valid" in src:
-                raw = np.where(raw < src["min_valid"], np.nan, raw)
-            if "max_valid" in src:
-                raw = np.where(raw > src["max_valid"], np.nan, raw)
-            raw = raw * float(src.get("scale", 1.0))
-            add(spec["name"], spec["unit"], key, raw, f"{key[0]}[{key[1]}].{src['field']}")
-            break
+    def lookup(topic: str, instance: int, field: str) -> FloatArray | None:
+        data = topics.get((topic, instance))
+        if data is None or field not in data:
+            return None
+        return np.asarray(data[field], dtype=np.float64)
+
+    apply_mapping(mapping, lookup, add)
 
     # 2. Computed signals.
     _attitude(topics, add)
     _vibration(topics, add, time_of, quality)
+    signals.update(_raw_gyro(topics, start_us))
     params = {k: float(v) for k, v in ulog.initial_parameters.items()}
     system_type = _last_int(topics.get(("vehicle_status", 0)), "system_type")
     _motors(topics, add, params, system_type)
@@ -197,16 +188,6 @@ def parse(path: Path) -> Flight:
     for label, names in EXPECTED_TOPICS.items():
         if not any((n, 0) in topics for n in names):
             quality.append(ParseIssue("missing_topic", f"No {label} data ({' or '.join(names)})"))
-    ends_armed = next((e for e in events if e.text == "Log ends while armed"), None)
-    if ends_armed is not None:
-        quality.append(
-            ParseIssue(
-                "ends_armed",
-                "The log ends while the aircraft is still armed: the file may be truncated, "
-                "or logging stopped in flight (power loss or crash)",
-                ends_armed.t,
-            )
-        )
     if getattr(ulog, "file_corruption", False):
         quality.append(
             ParseIssue("corrupt", "The file is damaged or truncated; data after the damage is lost")
@@ -219,16 +200,14 @@ def parse(path: Path) -> Flight:
         vehicle_type=_vehicle_type(system_type, topics.get(("vehicle_status", 0))),
         firmware=_firmware(info),
         hardware=str(info["ver_hw"]) if "ver_hw" in info else None,
+        serial=str(info["sys_uuid"]).strip() or None if "sys_uuid" in info else None,
         start_time=_utc_start(topics, start_us),
         log_duration=(int(ulog.last_timestamp) - start_us) / 1e6,
         mapping_version=str(mapping["version"]),
     )
     status = topics.get(("vehicle_status", 0))
     arming_known = status is not None and "arming_state" in status
-    if arming_known and not segments:
-        quality.append(
-            ParseIssue("never_armed", "The aircraft never armed in this log, so there is no flight")
-        )
+    arming_quality(events, segments, arming_known, quality)
     return Flight(
         metadata=metadata,
         signals=signals,
@@ -331,6 +310,53 @@ def _vibration(
             np.asarray(total, dtype=np.float64),
             f"{key[0]}[{key[1]}].accel_clipping (worst of {len(imus)} IMU)",
         )
+
+
+def _raw_gyro(topics: dict[TopicKey, TopicData], start_us: int) -> dict[str, Signal]:
+    """High-rate gyro for the noise spectrum.
+
+    ``sensor_gyro_fifo`` (raw, sensor rate; logged with the high-rate IMU
+    profile) holds up to 32 samples per axis per message, ``dt`` microseconds
+    apart, the last one at ``timestamp_sample``, value = raw * scale (rad/s).
+    Otherwise ``sensor_combined`` (about 200 Hz) is used.
+    """
+    fifo = topics.get(("sensor_gyro_fifo", 0))
+    if fifo is not None and all(f in fifo for f in ("dt", "scale", "samples", "x[0]")):
+        n = fifo["samples"].astype(np.int64)
+        width = max(i for i in range(32) if f"x[{i}]" in fifo) + 1
+        i = np.arange(width)[None, :]
+        valid = i < n[:, None]
+        ts = fifo["timestamp_sample" if "timestamp_sample" in fifo else "timestamp"]
+        dt = fifo["dt"].astype(np.float64)[:, None]
+        t_us = ts.astype(np.float64)[:, None] - (n[:, None] - 1 - i) * dt
+        t = ((t_us - start_us) / 1e6)[valid]
+        order = np.argsort(t, kind="stable")
+        scale = fifo["scale"].astype(np.float64)[:, None]
+        out = {}
+        for axis in "xyz":
+            raw = np.stack([fifo[f"{axis}[{j}]"] for j in range(width)], axis=1)
+            v = np.degrees((raw.astype(np.float64) * scale)[valid])[order]
+            out[f"gyro.raw.{axis}"] = Signal(
+                f"gyro.raw.{axis}", "deg/s", t[order], v, "sensor_gyro_fifo[0] (raw)"
+            )
+        if t.size >= 64:
+            return out
+    comb = topics.get(("sensor_combined", 0))
+    if comb is not None and all(f"gyro_rad[{j}]" in comb for j in range(3)):
+        t = (comb["timestamp"].astype(np.float64) - start_us) / 1e6
+        if t.size >= 64:
+            order = np.argsort(t, kind="stable")
+            return {
+                f"gyro.raw.{a}": Signal(
+                    f"gyro.raw.{a}",
+                    "deg/s",
+                    t[order],
+                    np.degrees(comb[f"gyro_rad[{j}]"].astype(np.float64))[order],
+                    "sensor_combined.gyro_rad",
+                )
+                for j, a in enumerate("xyz")
+            }
+    return {}
 
 
 def _motors(

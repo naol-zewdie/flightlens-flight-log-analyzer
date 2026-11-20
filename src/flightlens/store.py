@@ -46,7 +46,9 @@ CREATE TABLE IF NOT EXISTS flights (
     score         INTEGER,
     n_problem     INTEGER,
     n_attention   INTEGER,
-    aircraft      TEXT
+    aircraft      TEXT,
+    serial        TEXT,
+    metrics       TEXT              -- JSON, flightlens.metrics
 );
 CREATE TABLE IF NOT EXISTS jobs (
     id          TEXT PRIMARY KEY,
@@ -95,6 +97,7 @@ class Store:
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA foreign_keys = ON")
         self._db.executescript(SCHEMA)
+        self._migrate()
         # Jobs interrupted by a restart are failed, never left "processing".
         self._db.execute(
             "UPDATE jobs SET status='failed', error='Interrupted by a restart; upload again' "
@@ -105,6 +108,14 @@ class Store:
             "WHERE status IN ('queued','processing')"
         )
         self._db.commit()
+
+    def _migrate(self) -> None:
+        """Add columns that newer versions need to a database made by an older one."""
+        have = {r["name"] for r in self._db.execute("PRAGMA table_info(flights)")}
+        for column in ("serial", "metrics"):
+            if column not in have:
+                self._db.execute(f"ALTER TABLE flights ADD COLUMN {column} TEXT")
+        self._db.execute("CREATE INDEX IF NOT EXISTS flights_serial ON flights(serial)")
 
     # --- paths ---------------------------------------------------------------
 
@@ -194,12 +205,15 @@ class Store:
     def record_result(self, flight_id: str, summary: dict[str, Any]) -> None:
         with self._lock:
             self._db.execute(
-                "UPDATE flights SET firmware=?, vehicle_type=?, hardware=?, start_time=?, "
-                "duration_s=?, verdict=?, score=?, n_problem=?, n_attention=? WHERE id=?",
+                "UPDATE flights SET firmware=?, vehicle_type=?, hardware=?, serial=?, metrics=?, "
+                "start_time=?, duration_s=?, verdict=?, score=?, n_problem=?, n_attention=? "
+                "WHERE id=?",
                 (
                     summary.get("firmware"),
                     summary.get("vehicle_type"),
                     summary.get("hardware"),
+                    summary.get("serial"),
+                    json.dumps(summary["metrics"]) if summary.get("metrics") is not None else None,
                     summary.get("start_time"),
                     summary.get("duration_s"),
                     summary.get("verdict"),
@@ -209,6 +223,14 @@ class Store:
                     flight_id,
                 ),
             )
+            # Same board as an aircraft the user already named: take that name.
+            if summary.get("serial"):
+                self._db.execute(
+                    "UPDATE flights SET aircraft=(SELECT aircraft FROM flights f "
+                    "WHERE f.serial=? AND f.aircraft IS NOT NULL AND f.id<>? "
+                    "ORDER BY f.uploaded_at DESC LIMIT 1) WHERE id=? AND aircraft IS NULL",
+                    (summary["serial"], flight_id, flight_id),
+                )
             self._db.commit()
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
@@ -237,10 +259,29 @@ class Store:
             rows = self._db.execute(sql, args).fetchall()
         return [dict(r) for r in rows]
 
-    def set_aircraft(self, flight_id: str, label: str | None) -> None:
+    def set_aircraft(self, flight_id: str, label: str | None, same_board: bool = False) -> int:
+        """Label one flight, or every flight from the same autopilot board; returns the count."""
         with self._lock:
-            self._db.execute("UPDATE flights SET aircraft=? WHERE id=?", (label, flight_id))
+            if same_board:
+                cur = self._db.execute(
+                    "UPDATE flights SET aircraft=? WHERE serial IS NOT NULL AND serial="
+                    "(SELECT serial FROM flights WHERE id=?)",
+                    (label, flight_id),
+                )
+                if cur.rowcount:
+                    self._db.commit()
+                    return cur.rowcount
+            cur = self._db.execute("UPDATE flights SET aircraft=? WHERE id=?", (label, flight_id))
             self._db.commit()
+            return cur.rowcount
+
+    def stale_flights(self) -> list[str]:
+        """Analyzed flights without metrics (analyzed by an older version)."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT id FROM flights WHERE status='done' AND metrics IS NULL"
+            ).fetchall()
+        return [r["id"] for r in rows]
 
     def delete_flight(self, flight_id: str) -> bool:
         """Delete the files first, then the index row.
@@ -258,6 +299,13 @@ class Store:
 
     def read_report(self, flight_id: str) -> dict[str, Any] | None:
         path = self.flight_dir(flight_id) / "analysis" / "report.json"
+        if not path.exists():
+            return None
+        data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        return data
+
+    def read_spectrum(self, flight_id: str) -> dict[str, Any] | None:
+        path = self.flight_dir(flight_id) / "analysis" / "spectrum.json"
         if not path.exists():
             return None
         data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))

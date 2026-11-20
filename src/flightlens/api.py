@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from flightlens import __version__, parsers
+from flightlens import __version__, fleet, parsers
 from flightlens.lttb import lttb, with_gaps
 from flightlens.store import Store, safe_suffix
 from flightlens.worker import DEFAULT_TIMEOUT_S, JobRunner
@@ -36,6 +36,8 @@ TRACK_POINTS = 3_000
 
 class FlightPatch(BaseModel):
     aircraft: str | None = None
+    same_board: bool = False
+    """Apply the label to every flight from the same autopilot board."""
 
 
 def create_app(
@@ -43,12 +45,14 @@ def create_app(
     web_dir: Path | None = None,
     timeout_s: float = DEFAULT_TIMEOUT_S,
     allowed_hosts: Sequence[str] = LOCAL_HOSTS,
+    read_only: bool = False,
 ) -> FastAPI:
     """Build the app.
 
     ``allowed_hosts`` lists the host names the server answers to (``"*"`` for
     any). Anything else is refused, which blocks DNS-rebinding attacks from web
-    pages open in the user's browser.
+    pages open in the user's browser. ``read_only`` refuses every change
+    (uploads, edits, deletes, re-analysis), for a public demo.
     """
     store = Store(data_dir)
     runner = JobRunner(store, timeout_s=timeout_s)
@@ -60,7 +64,9 @@ def create_app(
     )
     app.state.store = store
     app.state.runner = runner
-    app.add_middleware(RequestGuard, allowed_hosts=tuple(h.lower() for h in allowed_hosts))
+    app.add_middleware(
+        RequestGuard, allowed_hosts=tuple(h.lower() for h in allowed_hosts), read_only=read_only
+    )
 
     def flight_or_404(flight_id: str) -> dict[str, Any]:
         row = store.get_flight(flight_id)
@@ -79,7 +85,12 @@ def create_app(
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
-        return {"status": "ok", "version": __version__, "queued_jobs": runner.pending()}
+        return {
+            "status": "ok",
+            "version": __version__,
+            "queued_jobs": runner.pending(),
+            "read_only": read_only,
+        }
 
     # A plain ``def``: FastAPI runs it in a worker thread, so hashing and
     # copying a large file does not block other requests.
@@ -153,8 +164,70 @@ def create_app(
     def patch_flight(flight_id: str, body: FlightPatch) -> dict[str, Any]:
         flight_or_404(flight_id)
         label = (body.aircraft or "").strip()[:80] or None
-        store.set_aircraft(flight_id, label)
-        return {"flight": store.get_flight(flight_id)}
+        updated = store.set_aircraft(flight_id, label, same_board=body.same_board)
+        return {"flight": store.get_flight(flight_id), "updated": updated}
+
+    # --- aircraft ------------------------------------------------------------------
+
+    def aircraft_rows() -> dict[str, list[dict[str, Any]]]:
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for row in store.list_flights():
+            key = fleet.aircraft_key(row)
+            if key and row["status"] == "done":
+                groups.setdefault(key, []).append(row)
+        return groups
+
+    @app.get("/api/aircraft")
+    def aircraft_list() -> dict[str, Any]:
+        groups = aircraft_rows()
+        items = [fleet.summarize_aircraft(k, rows) for k, rows in groups.items()]
+        # most recently flown first, aircraft with drift alerts on top
+        items.sort(key=lambda a: str(a["last"] or ""), reverse=True)
+        items.sort(key=lambda a: len(a["alerts"]), reverse=True)
+        grouped = sum(len(v) for v in groups.values())
+        done = [r for r in store.list_flights() if r["status"] == "done"]
+        return {
+            "aircraft": items,
+            "unassigned": len(done) - grouped,
+            "stale": len(store.stale_flights()),
+        }
+
+    @app.get("/api/aircraft/{key:path}")
+    def aircraft_detail(key: str) -> dict[str, Any]:
+        rows = aircraft_rows().get(key)
+        if not rows:
+            raise HTTPException(404, "No aircraft with this id")
+        ordered = sorted(rows, key=fleet.flight_time)
+        return {
+            **fleet.summarize_aircraft(key, rows),
+            "metrics": [s.to_dict() for s in fleet.series(rows)],
+            "flight_list": [
+                {
+                    k: r.get(k)
+                    for k in (
+                        "id",
+                        "filename",
+                        "start_time",
+                        "uploaded_at",
+                        "verdict",
+                        "score",
+                        "firmware",
+                        "serial",
+                    )
+                }
+                for r in ordered
+            ],
+        }
+
+    @app.post("/api/reanalyze-stale", status_code=202)
+    def reanalyze_stale() -> dict[str, Any]:
+        """Re-analyze flights analyzed by an older version (no trend metrics yet)."""
+        jobs = []
+        for flight_id in store.stale_flights():
+            job_id = store.requeue(flight_id)
+            runner.submit(job_id, flight_id)
+            jobs.append(job_id)
+        return {"queued": len(jobs)}
 
     @app.post("/api/flights/{flight_id}/reanalyze", status_code=202)
     def reanalyze(flight_id: str) -> dict[str, Any]:
@@ -225,6 +298,12 @@ def create_app(
                 }
             )
         return {"signals": out}
+
+    @app.get("/api/flights/{flight_id}/spectrum")
+    def spectrum(flight_id: str) -> dict[str, Any]:
+        """Gyro noise spectrum (PSD per axis, throttle tracking, spectrogram), or null."""
+        report_or_409(flight_id)
+        return {"spectrum": store.read_spectrum(flight_id)}
 
     @app.get("/api/flights/{flight_id}/track")
     def track(flight_id: str) -> dict[str, Any]:
@@ -304,13 +383,15 @@ class RequestGuard:
     * The Host header must be an allowed host (DNS-rebinding protection).
     * Requests that change data must not come from another site: if the browser
       sends an Origin header, it must match the Host.
+    * On a read-only server, nothing may change.
     * Uploads must declare their size, and it must be within the limit, so an
       oversized body is refused before anything is written to disk.
     """
 
-    def __init__(self, app: Any, allowed_hosts: tuple[str, ...]) -> None:
+    def __init__(self, app: Any, allowed_hosts: tuple[str, ...], read_only: bool = False) -> None:
         self.app = app
         self.allowed_hosts = allowed_hosts
+        self.read_only = read_only
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] != "http":
@@ -323,6 +404,9 @@ class RequestGuard:
             return
 
         if scope["method"] not in ("GET", "HEAD", "OPTIONS"):
+            if self.read_only:
+                await _reject(send, 403, "This is a read-only demo: uploads and changes are off")
+                return
             origin = headers.get("origin")
             if origin is not None and urlsplit(origin).netloc.lower() != host.lower():
                 await _reject(send, 403, "Cross-site requests are not allowed")

@@ -80,7 +80,7 @@ def _load_or_exit(log: Path) -> Any:
 
 @app.command("analyze")
 def analyze_cmd(
-    log: Annotated[Path, typer.Argument(help="Path to a .bin, .ulg or .tlog file.")],
+    log: Annotated[Path, typer.Argument(help="Path to a PX4 .ulg or ArduPilot .bin log.")],
     json_out: Annotated[
         Path | None, typer.Option("--json", help="Also write the report as JSON.")
     ] = None,
@@ -223,6 +223,77 @@ def _print_batch_summary(rows: list[dict[str, Any]], skipped: Counter[str], out:
         )
 
 
+@app.command("validate")
+def validate_cmd(
+    manifests: Annotated[
+        list[Path],
+        typer.Argument(help="Label manifests (.yaml), or folders containing them."),
+    ],
+    json_out: Annotated[
+        Path | None, typer.Option("--json", help="Write the full results as JSON.")
+    ] = None,
+    markdown_out: Annotated[
+        Path | None, typer.Option("--markdown", help="Write the results as a Markdown report.")
+    ] = None,
+    title: Annotated[
+        str, typer.Option(help="Title of the Markdown report.")
+    ] = "Validation results",
+) -> None:
+    """Score FlightLens against logs with known outcomes (exit 1 if any log is wrong)."""
+    from flightlens import validate
+
+    files = validate.find_manifests(manifests)
+    try:
+        cases = [c for m in files for c in validate.load_manifest(m)]
+    except (OSError, ValueError, KeyError) as exc:
+        err_console.print(f"[red]error:[/] cannot read manifest: {exc}")
+        raise typer.Exit(EXIT_USAGE) from exc
+    if not cases:
+        err_console.print("[red]error:[/] no labelled logs found")
+        raise typer.Exit(EXIT_USAGE)
+
+    outcomes = []
+    for case in cases:
+        o = validate.evaluate(case)
+        outcomes.append(o)
+        mark = Text("PASS ", style="green") if o.passed else Text("FAIL ", style="bold red")
+        mark.append(f"{case.id:<44} ")
+        mark.append("; ".join(o.problems())[:110], style="" if o.passed else "red")
+        console.print(mark)
+
+    table = Table(box=None, header_style="bold", pad_edge=False)
+    for col in (
+        "Check",
+        "Expected",
+        "Detected",
+        "Severity ok",
+        "False alarms",
+        "Recall",
+        "Precision",
+    ):
+        table.add_column(col, justify="left" if col == "Check" else "right")
+    for check, s in validate.per_check(outcomes).items():
+        table.add_row(
+            check,
+            str(s.expected),
+            str(s.detected),
+            str(s.exact),
+            str(s.false_alarms),
+            "-" if s.recall is None else f"{100 * s.recall:.0f}%",
+            "-" if s.precision is None else f"{100 * s.precision:.0f}%",
+        )
+    console.print()
+    console.print(table)
+    passed = sum(o.passed for o in outcomes)
+    console.print(f"\n{passed} of {len(outcomes)} logs fully correct")
+
+    if json_out is not None:
+        json_out.write_text(json.dumps(validate.to_dict(outcomes), indent=2), encoding="utf-8")
+    if markdown_out is not None:
+        markdown_out.write_text(validate.to_markdown(outcomes, title), encoding="utf-8")
+    raise typer.Exit(0 if passed == len(outcomes) else 1)
+
+
 @app.command("checks")
 def checks_cmd() -> None:
     """List the available checks and their default thresholds."""
@@ -238,27 +309,49 @@ def checks_cmd() -> None:
     console.print(table)
 
 
-@app.command("serve")
-def serve_cmd(
-    host: Annotated[str, typer.Option(help="Interface to listen on.")] = "127.0.0.1",
-    port: Annotated[int, typer.Option(help="Port to listen on.")] = 8000,
-    data: Annotated[
-        Path | None, typer.Option(help="Data folder (default: $FLIGHTLENS_DATA or ./data).")
-    ] = None,
-    web: Annotated[
-        Path | None,
-        typer.Option(help="Built web UI folder (default: $FLIGHTLENS_WEB or web/dist)."),
-    ] = None,
-    allow_host: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--allow-host",
-            help="Extra host name the server answers to, e.g. a LAN IP (repeatable; "
-            "also $FLIGHTLENS_ALLOWED_HOSTS, comma-separated). Default: localhost only.",
-        ),
-    ] = None,
+HostOpt = Annotated[str, typer.Option(help="Interface to listen on.")]
+PortOpt = Annotated[int, typer.Option(help="Port to listen on.")]
+WebOpt = Annotated[
+    Path | None,
+    typer.Option(
+        help="Built web UI folder (default: $FLIGHTLENS_WEB, the bundled UI, or web/dist)."
+    ),
+]
+AllowHostOpt = Annotated[
+    list[str] | None,
+    typer.Option(
+        "--allow-host",
+        help="Extra host name the server answers to, e.g. a LAN IP (repeatable; "
+        "also $FLIGHTLENS_ALLOWED_HOSTS, comma-separated). Default: localhost only.",
+    ),
+]
+ReadOnlyOpt = Annotated[
+    bool,
+    typer.Option("--read-only", help="Refuse uploads, edits and deletes (for a public demo)."),
+]
+
+
+def default_web_dir() -> Path:
+    """$FLIGHTLENS_WEB, else ./web/dist (a source checkout, freshest), else the UI
+    bundled in the installed package."""
+    import os
+
+    if env := os.environ.get("FLIGHTLENS_WEB"):
+        return Path(env)
+    local = Path("web/dist")
+    if (local / "index.html").exists():
+        return local
+    return Path(__file__).parent / "web"
+
+
+def _serve(
+    host: str,
+    port: int,
+    data_dir: Path,
+    web: Path | None,
+    allow_host: list[str] | None,
+    read_only: bool,
 ) -> None:
-    """Start the web app and API."""
     import os
 
     import uvicorn
@@ -271,24 +364,83 @@ def serve_cmd(
         hosts.append(host)
     hosts = [h for h in hosts if h]
 
-    data_dir = data or Path(os.environ.get("FLIGHTLENS_DATA", "data"))
-    web_dir = web or Path(os.environ.get("FLIGHTLENS_WEB", "web/dist"))
+    web_dir = web or default_web_dir()
     if not (web_dir / "index.html").exists():
         err_console.print(f"[yellow]note:[/] no web UI at {web_dir}; serving the API only")
-    console.print(f"FlightLens {__version__} · data in {data_dir.resolve()}")
+    mode = " · read-only" if read_only else ""
+    console.print(f"FlightLens {__version__} · data in {data_dir.resolve()}{mode}")
     console.print(f"Open http://{'localhost' if host in ('0.0.0.0', '127.0.0.1') else host}:{port}")
     uvicorn.run(
-        create_app(data_dir, web_dir, allowed_hosts=hosts),
+        create_app(data_dir, web_dir, allowed_hosts=hosts, read_only=read_only),
         host=host,
         port=port,
         log_level="warning",
     )
 
 
+@app.command("serve")
+def serve_cmd(
+    host: HostOpt = "127.0.0.1",
+    port: PortOpt = 8000,
+    data: Annotated[
+        Path | None, typer.Option(help="Data folder (default: $FLIGHTLENS_DATA or ./data).")
+    ] = None,
+    web: WebOpt = None,
+    allow_host: AllowHostOpt = None,
+    read_only: ReadOnlyOpt = False,
+) -> None:
+    """Start the web app and API."""
+    import os
+
+    data_dir = data or Path(os.environ.get("FLIGHTLENS_DATA", "data"))
+    _serve(host, port, data_dir, web, allow_host, read_only)
+
+
+@app.command("demo")
+def demo_cmd(
+    data: Annotated[
+        Path, typer.Option(help="Folder for the demo flights (kept between runs).")
+    ] = Path("flightlens-demo"),
+    host: HostOpt = "127.0.0.1",
+    port: PortOpt = 8000,
+    web: WebOpt = None,
+    allow_host: AllowHostOpt = None,
+    read_only: ReadOnlyOpt = False,
+    seed_only: Annotated[
+        bool, typer.Option("--seed-only", help="Create the demo flights and exit.")
+    ] = False,
+) -> None:
+    """Generate example flights (each with a known fault) and open them in the web app."""
+    from flightlens.demo import seed
+
+    console.print(f"Preparing demo flights in {data.resolve()} ...")
+    ids = seed(data, progress=lambda name: console.print(f"  analyzing {name}"))
+    console.print(f"{len(ids)} demo flights ready")
+    if not seed_only:
+        _serve(host, port, data, web, allow_host, read_only)
+
+
 @app.command("version")
 def version_cmd() -> None:
     """Print the FlightLens version."""
     console.print(__version__)
+
+
+def _time_text(report: Report, summ: Any) -> str | None:
+    if report.flight.never_armed:
+        log = report.flight.metadata.log_duration
+        return "never armed" + (f" (log {format_time(log)})" if log else "")
+    if summ.duration_s is None:
+        return None
+    text = f"armed {format_time(summ.duration_s)}"
+    if summ.airborne_s is not None:
+        n = len(summ.sorties)
+        text += (
+            f", in the air {format_time(summ.airborne_s)} ({n} sortie{'s' if n != 1 else ''})"
+            if n
+            else ", never left the ground"
+        )
+    return text
 
 
 def render_report(report: Report, out: Console) -> None:
@@ -300,7 +452,7 @@ def render_report(report: Report, out: Console) -> None:
             f"FlightLens {report.engine_version}",
             md.firmware,
             md.vehicle_type,
-            format_time(summ.duration_s) if summ.duration_s is not None else None,
+            _time_text(report, summ),
         )
         if p
     )

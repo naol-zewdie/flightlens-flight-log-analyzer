@@ -9,6 +9,15 @@ thresholds do.
 ## [0.2.0] - unreleased
 
 ### Added
+- **Printable reports**: a self-contained HTML report per flight (evidence
+  charts, provenance, reviews; print to PDF), from the "Report" link or
+  `flightlens analyze --html`.
+- **Outdated-analysis detection**: flights analyzed by an older check or signal
+  mapping are marked with the reason, and can be re-analyzed in one click
+  (library) or one by one (flight page).
+- **Engineer review**: mark findings confirmed, false alarm or accepted with a
+  note; reviews never change the verdict, appear in reports, and export as a
+  `flightlens validate` manifest (`flightlens reviews export`).
 - **Threshold profiles**: per-aircraft threshold overrides, hand-written (YAML,
   API) or learned from the aircraft's own flights without a Problem
   (vibration, motor balance and battery attention levels; clamped, problem

@@ -28,6 +28,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from flightlens.profiles import Profile
+from flightlens.provenance import stale_reasons, versions_of
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS flights (
@@ -67,6 +68,19 @@ CREATE TABLE IF NOT EXISTS profiles (
     notes       TEXT,
     basis       TEXT,                 -- JSON, learned profiles only
     created_at  REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS reviews (
+    flight_id    TEXT NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
+    finding_key  TEXT NOT NULL,       -- reviews.finding_key: check@start second
+    check_id     TEXT NOT NULL,
+    severity     TEXT NOT NULL,
+    title        TEXT NOT NULL,
+    t_start      REAL,
+    t_end        REAL,
+    status       TEXT NOT NULL,       -- confirmed | false_alarm | accepted
+    note         TEXT,
+    reviewed_at  REAL NOT NULL,
+    PRIMARY KEY (flight_id, finding_key)
 );
 CREATE TABLE IF NOT EXISTS aircraft_profiles (
     aircraft_key  TEXT PRIMARY KEY,   -- fleet.aircraft_key: label:<name> or sn:<serial>
@@ -126,10 +140,21 @@ class Store:
     def _migrate(self) -> None:
         """Add columns that newer versions need to a database made by an older one."""
         have = {r["name"] for r in self._db.execute("PRAGMA table_info(flights)")}
-        for column in ("serial", "metrics"):
+        for column in ("serial", "metrics", "versions"):
             if column not in have:
                 self._db.execute(f"ALTER TABLE flights ADD COLUMN {column} TEXT")
         self._db.execute("CREATE INDEX IF NOT EXISTS flights_serial ON flights(serial)")
+        # Analyses made before versions were indexed: read them from the stored report.
+        rows = self._db.execute(
+            "SELECT id FROM flights WHERE status='done' AND versions IS NULL"
+        ).fetchall()
+        for row in rows:
+            report = self.read_report(row["id"])
+            if report is not None:
+                self._db.execute(
+                    "UPDATE flights SET versions=? WHERE id=?",
+                    (json.dumps(versions_of(report)), row["id"]),
+                )
 
     # --- paths ---------------------------------------------------------------
 
@@ -220,8 +245,8 @@ class Store:
         with self._lock:
             self._db.execute(
                 "UPDATE flights SET firmware=?, vehicle_type=?, hardware=?, serial=?, metrics=?, "
-                "start_time=?, duration_s=?, verdict=?, score=?, n_problem=?, n_attention=? "
-                "WHERE id=?",
+                "start_time=?, duration_s=?, verdict=?, score=?, n_problem=?, n_attention=?, "
+                "versions=? WHERE id=?",
                 (
                     summary.get("firmware"),
                     summary.get("vehicle_type"),
@@ -234,6 +259,7 @@ class Store:
                     summary.get("score"),
                     summary.get("n_problem"),
                     summary.get("n_attention"),
+                    json.dumps(summary["versions"]) if summary.get("versions") else None,
                     flight_id,
                 ),
             )
@@ -289,13 +315,89 @@ class Store:
             self._db.commit()
             return cur.rowcount
 
-    def stale_flights(self) -> list[str]:
-        """Analyzed flights without metrics (analyzed by an older version)."""
+    def stale_details(self) -> dict[str, list[str]]:
+        """Analyzed flights whose analysis is out of date, with the reasons."""
         with self._lock:
             rows = self._db.execute(
-                "SELECT id FROM flights WHERE status='done' AND metrics IS NULL"
+                "SELECT id, metrics, versions FROM flights WHERE status='done'"
             ).fetchall()
-        return [r["id"] for r in rows]
+        out = {}
+        for r in rows:
+            versions = json.loads(r["versions"]) if r["versions"] else None
+            reasons = stale_reasons(versions, has_metrics=r["metrics"] is not None)
+            if reasons:
+                out[r["id"]] = reasons
+        return out
+
+    def stale_flights(self) -> list[str]:
+        """Analyzed flights made by an older version of a check or mapping."""
+        return list(self.stale_details())
+
+    # --- engineer reviews --------------------------------------------------------
+
+    def set_review(
+        self, flight_id: str, finding: dict[str, Any], status: str, note: str | None
+    ) -> None:
+        from flightlens.reviews import finding_key
+
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO reviews VALUES (?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(flight_id, finding_key) DO UPDATE SET status=excluded.status, "
+                "note=excluded.note, reviewed_at=excluded.reviewed_at, "
+                "severity=excluded.severity, title=excluded.title, "
+                "t_start=excluded.t_start, t_end=excluded.t_end",
+                (
+                    flight_id,
+                    finding_key(finding),
+                    finding["check_id"],
+                    finding["severity"],
+                    finding["title"],
+                    finding.get("start"),
+                    finding.get("end"),
+                    status,
+                    note,
+                    time.time(),
+                ),
+            )
+            self._db.commit()
+
+    def clear_review(self, flight_id: str, key: str) -> bool:
+        with self._lock:
+            cur = self._db.execute(
+                "DELETE FROM reviews WHERE flight_id=? AND finding_key=?", (flight_id, key)
+            )
+            self._db.commit()
+        return cur.rowcount > 0
+
+    def reviews_for(self, flight_id: str) -> dict[str, dict[str, Any]]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM reviews WHERE flight_id=? ORDER BY t_start", (flight_id,)
+            ).fetchall()
+        return {r["finding_key"]: dict(r) for r in rows}
+
+    def all_reviews(self) -> list[dict[str, Any]]:
+        """Every review, with the flight's file name and stored original's name."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT r.*, f.filename FROM reviews r JOIN flights f ON f.id = r.flight_id "
+                "ORDER BY f.uploaded_at, r.t_start"
+            ).fetchall()
+        out = []
+        for r in rows:
+            original = self.original_path(r["flight_id"])
+            if original is not None:
+                out.append({**dict(r), "original": original.name})
+        return out
+
+    def review_counts(self) -> dict[str, int]:
+        """Number of reviewed findings per flight."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT flight_id, COUNT(*) AS n FROM reviews GROUP BY flight_id"
+            ).fetchall()
+        return {r["flight_id"]: r["n"] for r in rows}
 
     def delete_flight(self, flight_id: str) -> bool:
         """Delete the files first, then the index row.

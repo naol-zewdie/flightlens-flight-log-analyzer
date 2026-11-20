@@ -48,8 +48,8 @@ export function AircraftList() {
       {data && data.stale > 0 && (
         <div className="card card-body notice">
           <span>
-            {plural(data.stale, "flight")} {data.stale === 1 ? "was" : "were"} analyzed by an older version and
-            {data.stale === 1 ? " has" : " have"} no trend data yet.
+            {plural(data.stale, "flight")} {data.stale === 1 ? "was" : "were"} analyzed by an older version of
+            FlightLens; trends and verdicts may change when {data.stale === 1 ? "it is" : "they are"} re-analyzed.
           </span>
           {!readOnly &&
             (queued == null ? (

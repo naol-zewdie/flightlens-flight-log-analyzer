@@ -102,11 +102,44 @@ gone or present in both. Open it from two selected flights in the library, from
 "Compare with #n" in an aircraft's flight list, or "Compare…" on a flight, which
 picks the previous flight of the same aircraft.
 
+## Reports
+
+Each flight has a printable report (the "Report" link on a flight, or
+`flightlens analyze --html out.html`): verdict, every finding with its evidence
+chart and the limit it crossed, the checks that ran and their versions, data
+quality, engineer reviews and a provenance block (log SHA-256, FlightLens,
+check and mapping versions, threshold profile). It is one HTML file with no
+external resources, so it can be archived or emailed; print it from the browser
+to save an A4 PDF.
+
+## Outdated analyses
+
+Every flight records the version of each check and of the signal mapping that
+analyzed it. When FlightLens is upgraded and a check or mapping changes, the
+flights it analyzed are marked *outdated*, with the reason (for example
+`vibration.level 1.1.0 → 1.2.0`): their verdict may differ from what the
+current version would say. The library offers to re-analyze all of them; a
+flight's page offers to re-analyze it alone.
+
+## Engineer review
+
+An engineer can mark each Problem or Attention finding as *confirmed* (real),
+*false alarm* (FlightLens was wrong) or *accepted* (real, but acceptable), with
+a note. A review never changes the automatic verdict; it is shown next to the
+finding and in the report. Reviews are keyed by the check and the finding's
+start, so they survive re-analysis of the same log.
+
+Reviews export as a [validation manifest](validation.md) ("Export reviews" in
+the library, or `flightlens reviews export`): confirmed and accepted findings
+become expected findings, false alarms become `must_not` rules. Run
+`flightlens validate` on that file after an upgrade to see where the new
+version disagrees with your engineers.
+
 ## Storage
 
 | What | Where |
 |---|---|
-| Flight index, jobs, aircraft names, trend metrics, threshold profiles | SQLite (`data/flightlens.db`), migrated in place on upgrade |
+| Flight index, jobs, aircraft names, trend metrics, threshold profiles, reviews, analysis versions | SQLite (`data/flightlens.db`), migrated in place on upgrade |
 | Original logs | `data/flights/<id>/`, unchanged |
 | Signals | one Parquet file per signal, zstd |
 | Report, spectrum | JSON next to the signals |

@@ -17,15 +17,19 @@ from urllib.parse import quote, urlsplit
 
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from flightlens import __version__, fleet, parsers
 from flightlens.checks import all_checks
+from flightlens.htmlreport import render_html
 from flightlens.lttb import lttb, with_gaps
 from flightlens.metrics import METRICS
 from flightlens.profiles import NAME_MAX, ProfileError, learn_profile, parse_profile
+from flightlens.provenance import stale_reasons
+from flightlens.reviews import NOTE_MAX, REVIEWABLE, STATUSES, finding_key, manifest_yaml, orphaned
+from flightlens.reviews import with_keys as findings_with_reviews
 from flightlens.store import Store, safe_suffix
 from flightlens.worker import DEFAULT_TIMEOUT_S, JobRunner
 
@@ -46,6 +50,12 @@ class FlightPatch(BaseModel):
 class ProfileBody(BaseModel):
     description: str = ""
     checks: dict[str, dict[str, float]]
+
+
+class ReviewBody(BaseModel):
+    status: str
+    """confirmed | false_alarm | accepted"""
+    note: str = ""
 
 
 class AssignBody(BaseModel):
@@ -84,6 +94,13 @@ def create_app(
     app.add_middleware(
         RequestGuard, allowed_hosts=tuple(h.lower() for h in allowed_hosts), read_only=read_only
     )
+
+    def row_stale(row: dict[str, Any]) -> list[str]:
+        """Why this flight's analysis is out of date (empty when current or not analyzed)."""
+        if row["status"] != "done" and row["verdict"] is None:
+            return []
+        versions = json.loads(row["versions"]) if row.get("versions") else None
+        return stale_reasons(versions, has_metrics=row.get("metrics") is not None)
 
     def flight_or_404(flight_id: str) -> dict[str, Any]:
         row = store.get_flight(flight_id)
@@ -166,7 +183,13 @@ def create_app(
 
     @app.get("/api/flights")
     def flights(verdict: str | None = None, q: str | None = None) -> dict[str, Any]:
-        return {"flights": store.list_flights(verdict=verdict, q=q)}
+        reviewed = store.review_counts()
+        return {
+            "flights": [
+                {**row, "stale": bool(row_stale(row)), "reviewed": reviewed.get(row["id"], 0)}
+                for row in store.list_flights(verdict=verdict, q=q)
+            ]
+        }
 
     @app.get("/api/flights/{flight_id}")
     def flight(flight_id: str) -> dict[str, Any]:
@@ -175,7 +198,7 @@ def create_app(
         if report is None:
             return {"flight": row, "report": None}
         slim = {k: v for k, v in report.items() if k not in ("findings", "events")}
-        return {"flight": row, "report": slim}
+        return {"flight": row, "report": slim, "stale": row_stale(row)}
 
     @app.patch("/api/flights/{flight_id}")
     def patch_flight(flight_id: str, body: FlightPatch) -> dict[str, Any]:
@@ -339,9 +362,22 @@ def create_app(
             ],
         }
 
+    @app.get("/api/stale")
+    def stale() -> dict[str, Any]:
+        """Flights analyzed by an older version of a check or mapping, with the reasons."""
+        details = store.stale_details()
+        rows = {r["id"]: r for r in store.list_flights()}
+        return {
+            "flights": [
+                {"id": fid, "filename": rows[fid]["filename"], "reasons": reasons}
+                for fid, reasons in details.items()
+                if fid in rows
+            ]
+        }
+
     @app.post("/api/reanalyze-stale", status_code=202)
     def reanalyze_stale() -> dict[str, Any]:
-        """Re-analyze flights analyzed by an older version (no trend metrics yet)."""
+        """Re-analyze every flight whose analysis was made by an older check or mapping."""
         jobs = []
         for flight_id in store.stale_flights():
             job_id = store.requeue(flight_id)
@@ -371,7 +407,48 @@ def create_app(
 
     @app.get("/api/flights/{flight_id}/findings")
     def findings(flight_id: str) -> dict[str, Any]:
-        return {"findings": report_or_409(flight_id)["findings"]}
+        found = report_or_409(flight_id)["findings"]
+        reviews = store.reviews_for(flight_id)
+        return {
+            "findings": findings_with_reviews(found, reviews),
+            "orphaned_reviews": orphaned(found, reviews),
+        }
+
+    # --- engineer reviews ------------------------------------------------------------
+
+    @app.put("/api/flights/{flight_id}/reviews/{key}")
+    def put_review(flight_id: str, key: str, body: ReviewBody) -> dict[str, Any]:
+        found = report_or_409(flight_id)["findings"]
+        finding = next((f for f in found if finding_key(f) == key), None)
+        if finding is None:
+            raise HTTPException(404, "This flight has no such finding (it may have changed)")
+        if finding["severity"] not in REVIEWABLE:
+            raise HTTPException(422, "Only Problem and Attention findings can be reviewed")
+        if body.status not in STATUSES:
+            raise HTTPException(422, f"status must be one of {', '.join(STATUSES)}")
+        store.set_review(flight_id, finding, body.status, body.note.strip()[:NOTE_MAX] or None)
+        return {"review": store.reviews_for(flight_id)[key]}
+
+    @app.delete("/api/flights/{flight_id}/reviews/{key}")
+    def delete_review(flight_id: str, key: str) -> dict[str, Any]:
+        flight_or_404(flight_id)
+        if not store.clear_review(flight_id, key):
+            raise HTTPException(404, "No review for this finding")
+        return {"deleted": key}
+
+    @app.get("/api/reviews")
+    def reviews() -> dict[str, Any]:
+        return {"reviews": store.all_reviews()}
+
+    @app.get("/api/reviews/manifest.yaml")
+    def reviews_manifest() -> Response:
+        """Reviews as a ``flightlens validate`` manifest (a regression test set)."""
+        text = manifest_yaml(store.all_reviews(), store.root.resolve() / "flights")
+        return Response(
+            text,
+            media_type="application/yaml",
+            headers={"Content-Disposition": _attachment("flightlens-reviews.yaml")},
+        )
 
     @app.get("/api/flights/{flight_id}/events")
     def events(flight_id: str) -> dict[str, Any]:
@@ -461,6 +538,39 @@ def create_app(
         report = report_or_409(flight_id)
         name = Path(flight_or_404(flight_id)["filename"]).stem + ".report.json"
         return JSONResponse(report, headers={"Content-Disposition": _attachment(name)})
+
+    @app.get("/api/flights/{flight_id}/report.html")
+    def report_html(flight_id: str, download: bool = False) -> HTMLResponse:
+        """The printable report (self-contained HTML; print to PDF from the browser)."""
+        report = report_or_409(flight_id)
+        row = flight_or_404(flight_id)
+        units = {s["name"]: s["unit"] for s in report.get("signals", [])}
+
+        def read(name: str) -> tuple[np.ndarray, np.ndarray, str] | None:
+            if name not in units:
+                return None
+            data = store.read_signal(flight_id, name)
+            return (data[0], data[1], units[name]) if data is not None else None
+
+        html = render_html(
+            report,
+            read,
+            filename=row["filename"],
+            aircraft=row.get("aircraft"),
+            reviews=store.reviews_for(flight_id),
+            stale=row_stale(row),
+        )
+        headers = {
+            # the report fetches nothing and runs no script but its print button
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; "
+            "script-src 'unsafe-inline'; img-src data:",
+            "X-Content-Type-Options": "nosniff",
+        }
+        if download:
+            headers["Content-Disposition"] = _attachment(
+                Path(row["filename"]).stem + ".report.html"
+            )
+        return HTMLResponse(html, headers=headers)
 
     @app.get("/api/flights/{flight_id}/original")
     def original(flight_id: str) -> FileResponse:

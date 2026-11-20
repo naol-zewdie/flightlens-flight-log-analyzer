@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { aircraftKey, api, profileLabel, type Finding, type SeriesData } from "../api";
+import { aircraftKey, api, profileLabel, REVIEW_LABEL, type Finding, type SeriesData } from "../api";
 import { Chart, type Series } from "../components/Chart";
+import { ReviewBox } from "../components/ReviewBox";
+import { useReadOnly } from "../components/server";
 import { SevIcon, SevLabel } from "../components/Severity";
 import { Timeline } from "../components/Timeline";
 import { TrackView } from "../components/TrackView";
@@ -90,6 +92,7 @@ export function Overview() {
                   <span className="f-sub">
                     {f.severity === "problem" ? "Problem" : f.severity === "attention" ? "Attention" : "Check error"}
                     {f.start != null && <span className="num"> · {fmtWindow(f.start, f.end)}</span>}
+                    {f.review && <span className="review-tag"> · {REVIEW_LABEL[f.review.status]}</span>}
                     {f.measured != null && (
                       <span className="num">
                         {" "}· {fmtNum(f.measured)} {f.unit}
@@ -157,7 +160,8 @@ export function Overview() {
 }
 
 function Evidence({ finding, flightId, cursor, onPick }: { finding: Finding; flightId: string; cursor: number | null; onPick: (t: number) => void }) {
-  const { events, report } = useFlight();
+  const { events, report, reload } = useFlight();
+  const readOnly = useReadOnly();
   const [data, setData] = useState<SeriesData[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const names = finding.evidence_signals.slice(0, 4);
@@ -283,6 +287,7 @@ function Evidence({ finding, flightId, cursor, onPick }: { finding: Finding; fli
             {" · drag to zoom, double-click to reset"}
           </div>
         )}
+        <ReviewBox flightId={flightId} finding={finding} readOnly={readOnly} onSaved={reload} />
       </div>
     </section>
   );

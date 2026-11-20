@@ -68,6 +68,7 @@ def process_log(
     from flightlens.engine import analyze
     from flightlens.metrics import flight_metrics
     from flightlens.model import Severity
+    from flightlens.provenance import versions_of
     from flightlens.spectrum import analyze_spectrum
 
     flight = parsers.load(Path(log_path))
@@ -130,6 +131,7 @@ def process_log(
         "score": report.score,
         "n_problem": counts[Severity.PROBLEM],
         "n_attention": counts[Severity.ATTENTION],
+        "versions": versions_of(data),
     }
 
 

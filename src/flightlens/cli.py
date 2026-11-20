@@ -44,6 +44,8 @@ profile_app = typer.Typer(
     no_args_is_help=True, help="Threshold profiles: per-aircraft threshold overrides."
 )
 app.add_typer(profile_app, name="profile")
+reviews_app = typer.Typer(no_args_is_help=True, help="Engineer reviews of findings.")
+app.add_typer(reviews_app, name="reviews")
 console = Console(highlight=False)
 err_console = Console(stderr=True, highlight=False)
 
@@ -110,19 +112,39 @@ def analyze_cmd(
         Path | None, typer.Option("--json", help="Also write the report as JSON.")
     ] = None,
     profile_path: ProfileOption = None,
+    html_out: Annotated[
+        Path | None,
+        typer.Option(
+            "--html",
+            help="Also write a self-contained HTML report (open it and print to save a PDF).",
+        ),
+    ] = None,
 ) -> None:
     """Analyze a flight log and print the verdict and findings."""
+    from flightlens.htmlreport import flight_reader, render_html
+
     profile = _profile_or_exit(profile_path)
-    report = analyze(_load_or_exit(log), profile=profile)
+    flight = _load_or_exit(log)
+    report = analyze(flight, profile=profile)
     render_report(report, console)
 
-    if json_out is not None:
+    outputs: list[tuple[Path | None, str, Any]] = [
+        (json_out, "JSON report", lambda: json.dumps(report.to_dict(), indent=2)),
+        (
+            html_out,
+            "HTML report",
+            lambda: render_html(report.to_dict(), flight_reader(flight.signals), filename=log.name),
+        ),
+    ]
+    for path, what, make in outputs:
+        if path is None:
+            continue
         try:
-            json_out.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+            path.write_text(make(), encoding="utf-8")
         except OSError as exc:
-            err_console.print(f"[red]error:[/] cannot write {json_out}: {exc}")
+            err_console.print(f"[red]error:[/] cannot write {path}: {exc}")
             raise typer.Exit(EXIT_CANNOT_ANALYZE) from None
-        console.print(f"\nJSON report written to {json_out}")
+        console.print(f"\n{what} written to {path}")
 
     raise typer.Exit(report.verdict.exit_code)
 
@@ -275,6 +297,35 @@ def profile_learn_cmd(
         err_console.print(f"[red]error:[/] cannot write {out}: {exc}")
         raise typer.Exit(EXIT_CANNOT_ANALYZE) from None
     console.print(f"Profile {profile.name} ({profile.digest}) written to {out}")
+
+
+@reviews_app.command("export")
+def reviews_export_cmd(
+    out: Annotated[Path, typer.Option("--out", help="Write the manifest to this .yaml file.")],
+    data: Annotated[
+        Path, typer.Option("--data", help="FlightLens data folder (as for serve).")
+    ] = Path("data"),
+) -> None:
+    """Export engineer reviews as a validation manifest for `flightlens validate`.
+
+    Confirmed and accepted findings become expected findings; false alarms
+    become must-not rules. Re-run `flightlens validate` on the file after an
+    upgrade to see whether the new version still agrees with your reviews.
+    """
+    from flightlens.reviews import manifest_yaml
+    from flightlens.store import Store
+
+    if not (data / "flightlens.db").is_file():
+        err_console.print(f"[red]error:[/] {data} is not a FlightLens data folder")
+        raise typer.Exit(EXIT_USAGE)
+    store = Store(data)
+    rows = store.all_reviews()
+    if not rows:
+        err_console.print("[red]error:[/] there are no reviews to export")
+        raise typer.Exit(EXIT_CANNOT_ANALYZE)
+    out.write_text(manifest_yaml(rows, store.root.resolve() / "flights"), encoding="utf-8")
+    flights = len({r["flight_id"] for r in rows})
+    console.print(f"{len(rows)} reviews of {flights} flights written to {out}")
 
 
 @profile_app.command("show")

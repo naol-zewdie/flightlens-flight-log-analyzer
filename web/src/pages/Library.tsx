@@ -96,6 +96,16 @@ export function Library() {
     return () => clearInterval(id);
   }, [uploads, load]);
 
+  // Refresh while flights are being re-analyzed (e.g. after "Re-analyze all").
+  const analyzing = flights?.some((f) => f.status === "queued" || f.status === "processing") ?? false;
+  useEffect(() => {
+    if (!analyzing) return;
+    const id = setInterval(load, 1500);
+    return () => clearInterval(id);
+  }, [analyzing, load]);
+  const staleCount = flights?.filter((f) => f.stale).length ?? 0;
+  const reviewedCount = flights?.reduce((n, f) => n + (f.reviewed ?? 0), 0) ?? 0;
+
   // Drop anywhere on the page (not on a read-only demo).
   useEffect(() => {
     if (readOnly) return;
@@ -162,6 +172,20 @@ export function Library() {
         )}
       </div>
 
+      {staleCount > 0 && (
+        <div className="card card-body notice" role="status">
+          <span>
+            {plural(staleCount, "flight")} {staleCount === 1 ? "was" : "were"} analyzed by an older version of a check
+            or signal mapping; {staleCount === 1 ? "its verdict" : "their verdicts"} may differ from the current version's.
+          </span>
+          {!readOnly && (
+            <button className="btn" disabled={analyzing} onClick={() => api.reanalyzeStale().then(load)}>
+              {analyzing ? "Re-analyzing…" : "Re-analyze them"}
+            </button>
+          )}
+        </div>
+      )}
+
       {isEmpty ? (
         <button className="dropzone big" style={{ width: "100%" }} onClick={() => input.current?.click()}>
           <strong>Drop a flight log here</strong>
@@ -188,6 +212,12 @@ export function Library() {
               >
                 Compare {picked.length}/2
               </button>
+            )}
+            {reviewedCount > 0 && (
+              <a className="btn ghost" href="/api/reviews/manifest.yaml" download
+                title="Your reviews as a validation manifest: run `flightlens validate` on it after an upgrade">
+                Export reviews ({reviewedCount})
+              </a>
             )}
             <div className="segmented" role="group" aria-label="Filter by verdict">
               {FILTERS.map((f) => (
@@ -284,7 +314,11 @@ export function Library() {
                       {f.status === "failed" ? (
                         <span className="cell-sub">{f.error}</span>
                       ) : (
-                        <FindingCounts p={f.n_problem ?? 0} a={f.n_attention ?? 0} />
+                        <span style={{ display: "inline-flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                          <FindingCounts p={f.n_problem ?? 0} a={f.n_attention ?? 0} />
+                          {f.reviewed ? <span className="chip">{f.reviewed} reviewed</span> : null}
+                          {f.stale && <span className="chip stale" title="Analyzed by an older version">outdated</span>}
+                        </span>
                       )}
                     </td>
                     <td className="r num">{f.score ?? "—"}</td>

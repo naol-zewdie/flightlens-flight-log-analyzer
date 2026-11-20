@@ -53,13 +53,14 @@ uv run flightlens serve          # http://localhost:8000, data in ./data
 
 | Command | What it does |
 |---|---|
-| `flightlens analyze <log> [--json out.json]` | Prints the verdict and findings |
+| `flightlens analyze <log> [--json out.json] [--html out.html]` | Prints the verdict and findings; `--html` writes a self-contained report (print it to save a PDF) |
 | `flightlens batch <folder> [--csv out.csv]` | Analyzes every log in a folder and summarizes the results |
 | `flightlens signals <log>` | Lists every signal found, with its source topic and rate |
 | `flightlens serve` | Starts the web app and API |
 | `flightlens demo [--read-only]` | Generates example flights with known faults and opens them in the web app |
 | `flightlens checks` | Lists the checks, their signals and default thresholds |
 | `flightlens validate <manifest or folder>` | Scores FlightLens against labelled logs: per-check recall, precision, false alarms; exit 1 if any log is wrong |
+| `flightlens reviews export --data data --out reviews.yaml` | Exports engineer reviews of findings as a validation manifest for `flightlens validate` |
 | `flightlens profile learn <folder> --name N --out N.yaml` | Learns attention thresholds from one aircraft's own flights; use the file with `--profile` on `analyze`, `batch` and `validate` |
 
 Exit codes for `analyze` (for CI): `0` healthy · `1` attention · `2` problem · `3` insufficient data or unreadable log · `64` bad arguments.
@@ -111,7 +112,8 @@ The benchmark runs in CI, so a threshold or logic regression fails the build. It
 - **Common data model** ([model.py](src/flightlens/model.py)): signals named in one vocabulary (`vibe.metric`, `bat.volt`, …), events, parameters, armed segments and data-quality issues. Firmware-specific names live only in [mappings/px4.yaml](src/flightlens/parsers/mappings/px4.yaml) and [mappings/ardupilot.yaml](src/flightlens/parsers/mappings/ardupilot.yaml).
 - **Honest results:** a check without data is *not evaluated*, never OK. A flight is called *healthy* only if at least 3 checks actually ran and it was armed for at least 10 s; otherwise the verdict is *insufficient data*.
 - **Isolation:** the web server parses each upload in a separate process with a time limit, so a broken file cannot take it down.
-- **Traceability:** reports record the FlightLens version, each check's version, the mapping version and the log's SHA-256. Original files are kept unchanged.
+- **Traceability:** reports record the FlightLens version, each check's version, the mapping version, the threshold profile and the log's SHA-256. Original files are kept unchanged. After an upgrade, flights analyzed by an older check or mapping are marked *outdated*, with the reason, and can be re-analyzed in one click.
+- **Reports and review:** every flight has a printable, self-contained HTML report (evidence charts, provenance; print to PDF). An engineer can mark each finding *confirmed*, *false alarm* or *accepted* with a note; reviews never change the automatic verdict, appear in the report, and export as validation labels, so the next FlightLens version is tested against your own judgement.
 
 See [docs/real-log-results.md](docs/real-log-results.md) for how the checks behave on 28 real public PX4 logs.
 
@@ -138,7 +140,7 @@ Drop the file in `src/flightlens/checks/`; it is discovered automatically. Add s
 ## Development
 
 ```bash
-uv run pytest                                   # 192 tests (FLIGHTLENS_SLOW=1 adds a 100 MB test)
+uv run pytest                                   # 208 tests (FLIGHTLENS_SLOW=1 adds a 100 MB test)
 uv run ruff check . && uv run ruff format --check . && uv run mypy
 cd web && npm run dev                           # UI with hot reload; run `uv run flightlens serve` alongside
 uv run python scripts/fetch_px4_logs.py --count 20   # public test logs into testdata/real/

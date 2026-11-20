@@ -25,6 +25,10 @@ export interface FlightRow {
   serial: string | null;
   /** JSON of the per-flight trend metrics (see metricSpecs). */
   metrics: string | null;
+  /** Analyzed by an older check or mapping version (list endpoint only). */
+  stale?: boolean;
+  /** Number of reviewed findings (list endpoint only). */
+  reviewed?: number;
 }
 
 export interface MetricSpec {
@@ -125,7 +129,32 @@ export interface Finding {
   start: number | null;
   end: number | null;
   evidence_signals: string[];
+  /** Stable id within the flight (check@start second); reviews are keyed by it. */
+  key?: string;
+  review?: Review | null;
 }
+
+export type ReviewStatus = "confirmed" | "false_alarm" | "accepted";
+
+export interface Review {
+  status: ReviewStatus;
+  note: string | null;
+  reviewed_at: number;
+}
+
+export interface OrphanedReview extends Review {
+  finding_key: string;
+  check_id: string;
+  severity: Severity;
+  title: string;
+  t_start: number | null;
+}
+
+export const REVIEW_LABEL: Record<ReviewStatus, string> = {
+  confirmed: "Confirmed",
+  false_alarm: "False alarm",
+  accepted: "Accepted",
+};
 
 export interface FlightEvent {
   t: number;
@@ -207,8 +236,19 @@ export const api = {
     if (verdict) p.set("verdict", verdict);
     return call<{ flights: FlightRow[] }>(`/flights?${p}`);
   },
-  flight: (id: string) => call<{ flight: FlightRow; report: Report | null }>(`/flights/${id}`),
-  findings: (id: string) => call<{ findings: Finding[] }>(`/flights/${id}/findings`),
+  flight: (id: string) =>
+    call<{ flight: FlightRow; report: Report | null; stale?: string[] }>(`/flights/${id}`),
+  findings: (id: string) =>
+    call<{ findings: Finding[]; orphaned_reviews: OrphanedReview[] }>(`/flights/${id}/findings`),
+  setReview: (id: string, key: string, status: ReviewStatus, note: string) =>
+    call<{ review: Review }>(`/flights/${id}/reviews/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status, note }),
+    }),
+  clearReview: (id: string, key: string) =>
+    call<{ deleted: string }>(`/flights/${id}/reviews/${encodeURIComponent(key)}`, { method: "DELETE" }),
+  stale: () => call<{ flights: { id: string; filename: string; reasons: string[] }[] }>("/stale"),
   events: (id: string) =>
     call<{ events: FlightEvent[]; segments: { start: number; end: number }[] }>(`/flights/${id}/events`),
   track: (id: string) => call<Track>(`/flights/${id}/track`),

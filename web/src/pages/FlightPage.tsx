@@ -25,6 +25,7 @@ export function FlightPage() {
   const [flight, setFlight] = useState<FlightRow | null>(null);
   const [data, setData] = useState<Omit<FlightCtx, "cursor" | "setCursor" | "reload" | "flight"> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [stale, setStale] = useState<string[]>([]);
   const [cursor, setCursor] = useState<number | null>(null);
   const current = useRef(id);
 
@@ -39,9 +40,10 @@ export function FlightPage() {
 
   const load = useCallback(async () => {
     try {
-      const { flight, report } = await api.flight(id);
+      const { flight, report, stale } = await api.flight(id);
       if (current.current !== id) return;
       setFlight(flight);
+      setStale(stale ?? []);
       setError(null);
       if (flight.status !== "done" || !report) {
         setData(null);
@@ -88,6 +90,12 @@ export function FlightPage() {
             {flight.firmware && <span>{flight.firmware}</span>}
             <span>{fmtDate(flight.start_time, flight.uploaded_at)}</span>
             {flight.status === "done" && (
+              <a href={`/api/flights/${flight.id}/report.html`} target="_blank" rel="noopener" style={{ color: "var(--accent-ink)" }}
+                title="Printable report with evidence charts and provenance; print it to save a PDF">
+                Report
+              </a>
+            )}
+            {flight.status === "done" && (
               <Link to={`/compare?a=${flight.id}`} style={{ color: "var(--accent-ink)" }}
                 title="Overlay with another flight (by default the previous flight of this aircraft)">
                 Compare…
@@ -113,6 +121,20 @@ export function FlightPage() {
           </div>
         )}
       </div>
+
+      {flight.status === "done" && stale.length > 0 && (
+        <div className="card card-body notice" style={{ marginTop: 16, marginBottom: 0 }} role="status">
+          <span style={{ minWidth: 0 }}>
+            <b>Analyzed by an older version of FlightLens.</b>{" "}
+            <span className="muted">{stale.slice(0, 4).join("; ")}{stale.length > 4 ? ` and ${stale.length - 4} more` : ""}.</span>
+          </span>
+          {!readOnly && (
+            <button className="btn" onClick={() => api.reanalyze(id).then(load)}>
+              Re-analyze
+            </button>
+          )}
+        </div>
+      )}
 
       {flight.status === "queued" || flight.status === "processing" ? (
         <div className="card card-body" style={{ marginTop: 24 }}>

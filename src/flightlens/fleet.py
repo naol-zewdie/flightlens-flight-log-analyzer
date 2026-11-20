@@ -61,6 +61,18 @@ class Series:
         }
 
 
+def drift_limit(spec: MetricSpec, history: list[float]) -> tuple[float, float]:
+    """(baseline, margin): how much worse than the baseline counts as a real change.
+
+    The margin is the largest of the metric's relative and absolute minimum and
+    3 robust standard deviations of the history. Shared by drift alerts and by
+    learned threshold profiles.
+    """
+    base = median(history)
+    spread = 1.4826 * median(abs(h - base) for h in history)
+    return base, max(spec.rel * abs(base), spec.abs_min, 3 * spread)
+
+
 def assess(spec: MetricSpec, values: list[float]) -> list[tuple[float | None, bool]]:
     """(baseline, flagged) for each value, against the values before it."""
     out: list[tuple[float | None, bool]] = []
@@ -69,11 +81,8 @@ def assess(spec: MetricSpec, values: list[float]) -> list[tuple[float | None, bo
         if spec.worse == 0 or len(history) < MIN_HISTORY:
             out.append((median(history) if history else None, False))
             continue
-        base = median(history)
-        spread = 1.4826 * median(abs(h - base) for h in history)
-        worse_by = (v - base) * spec.worse
-        limit = max(spec.rel * abs(base), spec.abs_min, 3 * spread)
-        out.append((base, worse_by > limit))
+        base, limit = drift_limit(spec, history)
+        out.append((base, (v - base) * spec.worse > limit))
     return out
 
 
@@ -155,4 +164,12 @@ def summarize_aircraft(key: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-__all__ = ["BY_KEY", "aircraft_key", "alerts", "assess", "series", "summarize_aircraft"]
+__all__ = [
+    "BY_KEY",
+    "aircraft_key",
+    "alerts",
+    "assess",
+    "drift_limit",
+    "series",
+    "summarize_aircraft",
+]

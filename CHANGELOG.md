@@ -9,6 +9,16 @@ thresholds do.
 ## [0.2.0] - unreleased
 
 ### Added
+- **Threshold profiles**: per-aircraft threshold overrides, hand-written (YAML,
+  API) or learned from the aircraft's own flights without a Problem
+  (vibration, motor balance and battery attention levels; clamped, problem
+  levels never learned). Assigned on the Aircraft page, which re-analyzes the
+  aircraft's flights; `--profile` on `analyze`, `batch` and `validate`;
+  `flightlens profile learn` and `profile show`. Reports record the profile's
+  name, source and digest.
+- **Flight comparison**: two flights overlaid on their common signals, aligned
+  at takeoff, with health-metric changes and a findings diff (new, gone, both).
+  Opened from the library (select two), an aircraft's flight list, or a flight.
 - **ArduPilot `.bin` logs**: an independent DataFlash reader (no pymavlink) and a
   versioned signal mapping, with the same checks and report as PX4. A 100 MB log
   loads in about 3 s.

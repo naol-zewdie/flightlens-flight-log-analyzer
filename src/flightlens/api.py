@@ -22,7 +22,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from flightlens import __version__, fleet, parsers
+from flightlens.checks import all_checks
 from flightlens.lttb import lttb, with_gaps
+from flightlens.metrics import METRICS
+from flightlens.profiles import NAME_MAX, ProfileError, learn_profile, parse_profile
 from flightlens.store import Store, safe_suffix
 from flightlens.worker import DEFAULT_TIMEOUT_S, JobRunner
 
@@ -38,6 +41,20 @@ class FlightPatch(BaseModel):
     aircraft: str | None = None
     same_board: bool = False
     """Apply the label to every flight from the same autopilot board."""
+
+
+class ProfileBody(BaseModel):
+    description: str = ""
+    checks: dict[str, dict[str, float]]
+
+
+class AssignBody(BaseModel):
+    profile: str | None
+    """Profile name, or null for the checks' defaults."""
+
+
+class LearnBody(BaseModel):
+    name: str | None = None
 
 
 def create_app(
@@ -173,7 +190,8 @@ def create_app(
         groups: dict[str, list[dict[str, Any]]] = {}
         for row in store.list_flights():
             key = fleet.aircraft_key(row)
-            if key and row["status"] == "done":
+            # A flight being re-analyzed keeps its earlier result meanwhile.
+            if key and (row["status"] == "done" or row["verdict"] is not None):
                 groups.setdefault(key, []).append(row)
         return groups
 
@@ -192,14 +210,116 @@ def create_app(
             "stale": len(store.stale_flights()),
         }
 
+    @app.get("/api/metric-specs")
+    def metric_specs() -> dict[str, Any]:
+        """The per-flight trend metrics: label, unit and which direction is worse."""
+        return {
+            "metrics": [
+                {"key": m.key, "label": m.label, "unit": m.unit, "worse": m.worse} for m in METRICS
+            ]
+        }
+
+    # --- threshold profiles ----------------------------------------------------------
+
+    def requeue_aircraft(key: str) -> int:
+        """Re-analyze an aircraft's flights, e.g. after its thresholds changed."""
+        n = 0
+        for row in aircraft_rows().get(key, []):
+            if row["status"] in ("queued", "processing"):
+                continue
+            runner.submit(store.requeue(row["id"]), row["id"])
+            n += 1
+        return n
+
+    def profile_out(name: str) -> dict[str, Any]:
+        profile = store.get_profile(name)
+        if profile is None:
+            raise HTTPException(404, "No profile with this name")
+        used_by = [k for k, p in store.profile_assignments().items() if p.name == name]
+        return {**profile.to_dict(), "used_by": used_by, "defaults": _defaults_for(profile)}
+
+    @app.get("/api/profiles")
+    def profiles() -> dict[str, Any]:
+        assigned = store.profile_assignments()
+        return {
+            "profiles": [
+                {
+                    **p.to_dict(),
+                    "used_by": [k for k, a in assigned.items() if a.name == p.name],
+                }
+                for p in store.list_profiles()
+            ]
+        }
+
+    @app.get("/api/profiles/{name}")
+    def profile_detail(name: str) -> dict[str, Any]:
+        return profile_out(name)
+
+    @app.put("/api/profiles/{name}")
+    def put_profile(name: str, body: ProfileBody) -> dict[str, Any]:
+        """Create or replace a hand-written profile; aircraft using it are re-analyzed."""
+        try:
+            profile = parse_profile(
+                {"name": name, "description": body.description, "checks": body.checks},
+                source="user",
+            )
+        except ProfileError as exc:
+            raise HTTPException(422, str(exc)) from None
+        store.save_profile(profile)
+        queued = sum(
+            requeue_aircraft(k) for k, p in store.profile_assignments().items() if p.name == name
+        )
+        return {"profile": profile_out(name), "queued": queued}
+
+    @app.delete("/api/profiles/{name}")
+    def delete_profile(name: str) -> dict[str, Any]:
+        """Delete a profile; aircraft that used it go back to the defaults."""
+        users = [k for k, p in store.profile_assignments().items() if p.name == name]
+        if not store.delete_profile(name):
+            raise HTTPException(404, "No profile with this name")
+        return {"deleted": name, "queued": sum(requeue_aircraft(k) for k in users)}
+
+    @app.put("/api/aircraft/{key:path}/profile")
+    def assign_profile(key: str, body: AssignBody) -> dict[str, Any]:
+        if key not in aircraft_rows():
+            raise HTTPException(404, "No aircraft with this id")
+        if body.profile is not None and store.get_profile(body.profile) is None:
+            raise HTTPException(404, "No profile with this name")
+        store.assign_profile(key, body.profile)
+        return {"aircraft": key, "profile": body.profile, "queued": requeue_aircraft(key)}
+
+    @app.post("/api/aircraft/{key:path}/profile/learn")
+    def learn(key: str, body: LearnBody | None = None) -> dict[str, Any]:
+        """Learn attention thresholds from this aircraft's flights, assign and re-analyze."""
+        rows = aircraft_rows().get(key)
+        if not rows:
+            raise HTTPException(404, "No aircraft with this id")
+        summary = fleet.summarize_aircraft(key, rows)
+        serial = (summary["serials"] or [key])[0]
+        who = summary["label"] or f"{summary['hardware'] or 'board'} …{serial[-6:]}"
+        name = ((body.name if body else None) or f"Learned: {who}").strip()[:NAME_MAX]
+        try:
+            profile = learn_profile(name, rows, notes=f"Learned from {who}'s own flights")
+        except ProfileError as exc:
+            raise HTTPException(409, str(exc)) from None
+        store.save_profile(profile)
+        store.assign_profile(key, profile.name)
+        return {"profile": profile_out(profile.name), "queued": requeue_aircraft(key)}
+
     @app.get("/api/aircraft/{key:path}")
     def aircraft_detail(key: str) -> dict[str, Any]:
         rows = aircraft_rows().get(key)
         if not rows:
             raise HTTPException(404, "No aircraft with this id")
         ordered = sorted(rows, key=fleet.flight_time)
+        assigned = store.profile_assignments().get(key)
         return {
             **fleet.summarize_aircraft(key, rows),
+            "profile": {**assigned.to_dict(), "defaults": _defaults_for(assigned)}
+            if assigned
+            else None,
+            "profiles": [p.name for p in store.list_profiles()],
+            "pending": sum(r["status"] in ("queued", "processing") for r in rows),
             "metrics": [s.to_dict() for s in fleet.series(rows)],
             "flight_list": [
                 {
@@ -375,6 +495,15 @@ def _attachment(filename: str) -> str:
     return (
         f"attachment; filename=\"{fallback or 'report.json'}\"; filename*=UTF-8''{quote(filename)}"
     )
+
+
+def _defaults_for(profile: Any) -> dict[str, dict[str, float]]:
+    """The checks' default values for each setting a profile overrides."""
+    by_id = {c.id: c for c in all_checks()}
+    return {
+        cid: {k: by_id[cid].defaults[k] for k in values if cid in by_id}
+        for cid, values in profile.overrides.items()
+    }
 
 
 class RequestGuard:

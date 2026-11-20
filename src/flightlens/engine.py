@@ -12,13 +12,16 @@ import dataclasses
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from flightlens import __version__
 from flightlens.checks.base import Check, all_checks, alternative_signals
 from flightlens.intervals import format_time
 from flightlens.model import Finding, Flight, Severity
 from flightlens.summary import summarize
+
+if TYPE_CHECKING:
+    from flightlens.profiles import Profile
 
 ATTENTION_PENALTY = 10
 PROBLEM_PENALTY = 30
@@ -68,6 +71,8 @@ class Report:
     flight: Flight
     results: list[CheckResult]
     engine_version: str = __version__
+    profile: Profile | None = None
+    """Threshold profile used; None means the checks' defaults."""
     findings: list[Finding] = field(init=False)
 
     def __post_init__(self) -> None:
@@ -127,6 +132,7 @@ class Report:
                 "log_duration_s": md.log_duration,
                 "mapping_version": md.mapping_version,
             },
+            "profile": self.profile.provenance() if self.profile else None,
             "verdict": self.verdict.value,
             "score": self.score,
             "summary": summarize(self.flight).to_dict(),
@@ -226,14 +232,22 @@ def analyze(
     flight: Flight,
     checks: Sequence[Check] | None = None,
     config: Mapping[str, Mapping[str, float]] | None = None,
+    profile: Profile | None = None,
 ) -> Report:
     """Run every applicable check and build a report.
 
     ``config`` maps a check id to threshold overrides, e.g.
-    ``{"vibration.level": {"attention": 25.0}}``.
+    ``{"vibration.level": {"attention": 25.0}}``. A ``profile`` supplies
+    overrides too; ``config`` wins where both set the same value. The profile is
+    recorded in the report.
     """
     checks = list(checks) if checks is not None else all_checks()
-    config = config or {}
+    config = dict(config or {})
+    if profile is not None:
+        known_ids = {c.id for c in checks}
+        for check_id, values in profile.overrides.items():
+            if check_id in known_ids:  # a subset of checks ignores the rest
+                config[check_id] = {**values, **config.get(check_id, {})}
 
     known = {c.id for c in checks}
     unknown = set(config) - known
@@ -241,7 +255,9 @@ def analyze(
         raise ValueError(f"config refers to unknown check(s): {', '.join(sorted(unknown))}")
 
     return Report(
-        flight=flight, results=[_run_one(c, flight, config.get(c.id, {})) for c in checks]
+        flight=flight,
+        results=[_run_one(c, flight, config.get(c.id, {})) for c in checks],
+        profile=profile,
     )
 
 

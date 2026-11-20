@@ -3,6 +3,7 @@ import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom";
 import { useReadOnly } from "./components/server";
 import { getThemeChoice, setThemeChoice, type ThemeChoice } from "./components/theme";
 import { AircraftList, AircraftPage } from "./pages/Aircraft";
+import { Compare } from "./pages/Compare";
 import { Library } from "./pages/Library";
 import { FlightPage } from "./pages/FlightPage";
 import { Overview } from "./pages/Overview";
@@ -19,6 +20,7 @@ export function App() {
         <Route path="/" element={<Library />} />
         <Route path="/aircraft" element={<AircraftList />} />
         <Route path="/aircraft/:key" element={<AircraftPage />} />
+        <Route path="/compare" element={<Compare />} />
         <Route path="/flights/:id" element={<FlightPage />}>
           <Route index element={<Overview />} />
           <Route path="signals" element={<SignalsView />} />

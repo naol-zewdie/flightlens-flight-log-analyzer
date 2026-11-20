@@ -60,6 +60,7 @@ uv run flightlens serve          # http://localhost:8000, data in ./data
 | `flightlens demo [--read-only]` | Generates example flights with known faults and opens them in the web app |
 | `flightlens checks` | Lists the checks, their signals and default thresholds |
 | `flightlens validate <manifest or folder>` | Scores FlightLens against labelled logs: per-check recall, precision, false alarms; exit 1 if any log is wrong |
+| `flightlens profile learn <folder> --name N --out N.yaml` | Learns attention thresholds from one aircraft's own flights; use the file with `--profile` on `analyze`, `batch` and `validate` |
 
 Exit codes for `analyze` (for CI): `0` healthy · `1` attention · `2` problem · `3` insufficient data or unreadable log · `64` bad arguments.
 
@@ -86,7 +87,7 @@ Exit codes for `analyze` (for CI): `0` healthy · `1` attention · `2` problem �
 
 Checks only judge time **in the air**: armed, not landed (land detector, or ArduPlane `STAT.isFlying`), and in an armed period whose altitude actually changed. Short impact spikes (touchdown, crash) are reported by the crash check, not as vibration or clipping. On fixed wing, yaw is never tracked (there is no yaw setpoint), and an axis whose setpoint never changes is skipped.
 
-Thresholds are community starting values, not limits approved for your aircraft.
+Thresholds are community starting values, not limits approved for your aircraft. A **threshold profile** replaces them for one aircraft: written by hand, or learned from its own healthy flights (Aircraft page, or `flightlens profile learn`). Learned values only ever tighten or loosen *attention* levels, never reach the problem level, and every report records the profile it used. Two flights can be overlaid on the same signals, aligned at takeoff, on the Compare page.
 
 ## Validation
 
@@ -137,7 +138,7 @@ Drop the file in `src/flightlens/checks/`; it is discovered automatically. Add s
 ## Development
 
 ```bash
-uv run pytest                                   # 164 tests (FLIGHTLENS_SLOW=1 adds a 100 MB test)
+uv run pytest                                   # 192 tests (FLIGHTLENS_SLOW=1 adds a 100 MB test)
 uv run ruff check . && uv run ruff format --check . && uv run mypy
 cd web && npm run dev                           # UI with hot reload; run `uv run flightlens serve` alongside
 uv run python scripts/fetch_px4_logs.py --count 20   # public test logs into testdata/real/

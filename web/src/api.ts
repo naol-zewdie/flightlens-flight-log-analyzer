@@ -22,6 +22,52 @@ export interface FlightRow {
   n_problem: number | null;
   n_attention: number | null;
   aircraft: string | null;
+  serial: string | null;
+  /** JSON of the per-flight trend metrics (see metricSpecs). */
+  metrics: string | null;
+}
+
+export interface MetricSpec {
+  key: string;
+  label: string;
+  unit: string;
+  /** +1 higher is worse, -1 lower is worse, 0 context only */
+  worse: number;
+}
+
+/** The aircraft a flight belongs to, as the API keys it (see fleet.aircraft_key). */
+export function aircraftKey(f: { aircraft: string | null; serial: string | null }): string | null {
+  return f.aircraft ? `label:${f.aircraft}` : f.serial ? `sn:${f.serial}` : null;
+}
+
+export type Overrides = Record<string, Record<string, number>>;
+
+export interface ProfileRef {
+  name: string;
+  source: "user" | "learned" | "file";
+  digest: string;
+  overrides: Overrides;
+}
+
+/** "Quad-7 (learned)"; no suffix when the name already says so ("Learned: …"). */
+export function profileLabel(p: ProfileRef): string {
+  return p.source === "learned" && !/learned/i.test(p.name) ? `${p.name} (learned)` : p.name;
+}
+
+export interface LearnedValue {
+  metric: string;
+  flights: number;
+  median: number;
+  margin: number;
+  default: number;
+  clamped: boolean;
+}
+
+export interface Profile extends ProfileRef {
+  notes: string;
+  basis: { flights: number; flight_ids: string[]; values: Record<string, LearnedValue> } | null;
+  defaults: Overrides;
+  used_by?: string[];
 }
 
 export interface Summary {
@@ -56,6 +102,7 @@ export interface Report {
     log_duration_s: number | null;
     mapping_version: string | null;
   };
+  profile: ProfileRef | null;
   verdict: Verdict;
   score: number | null;
   summary: Summary;
@@ -186,6 +233,19 @@ export const api = {
   aircraft: () => call<{ aircraft: AircraftSummary[]; unassigned: number; stale: number }>("/aircraft"),
   aircraftDetail: (key: string) => call<AircraftDetail>(`/aircraft/${encodeURIComponent(key)}`),
   reanalyzeStale: () => call<{ queued: number }>("/reanalyze-stale", { method: "POST" }),
+  metricSpecs: () => call<{ metrics: MetricSpec[] }>("/metric-specs"),
+  assignProfile: (key: string, profile: string | null) =>
+    call<{ queued: number }>(`/aircraft/${encodeURIComponent(key)}/profile`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile }),
+    }),
+  learnProfile: (key: string) =>
+    call<{ profile: Profile; queued: number }>(`/aircraft/${encodeURIComponent(key)}/profile/learn`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    }),
 };
 
 export interface DriftAlert {
@@ -231,6 +291,10 @@ export interface MetricSeries {
 
 export interface AircraftDetail extends AircraftSummary {
   metrics: MetricSeries[];
+  profile: Profile | null;
+  profiles: string[];
+  /** Flights being (re-)analyzed right now. */
+  pending: number;
   flight_list: {
     id: string;
     filename: string;

@@ -15,15 +15,52 @@ import queue
 import shutil
 import threading
 import traceback
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from flightlens.profiles import Profile
 from flightlens.store import Store, write_signals
 
 DEFAULT_TIMEOUT_S = 300
 
 
-def process_log(log_path: str, out_dir: str) -> dict[str, Any]:
+@dataclass(frozen=True)
+class ProfileContext:
+    """What the child process needs to find a flight's threshold profile.
+
+    The board serial is only known after parsing, so the profile is resolved
+    there: the flight's own label first, then the label other flights of the
+    same board carry, then the board serial itself.
+    """
+
+    assignments: Mapping[str, Profile] = field(default_factory=dict)
+    label: str | None = None
+    labels_by_serial: Mapping[str, str] = field(default_factory=dict)
+
+    def resolve(self, serial: str | None) -> Profile | None:
+        keys = []
+        if self.label:
+            keys.append(f"label:{self.label}")
+        if serial and serial in self.labels_by_serial:
+            keys.append(f"label:{self.labels_by_serial[serial]}")
+        if serial:
+            keys.append(f"sn:{serial}")
+        return next((self.assignments[k] for k in keys if k in self.assignments), None)
+
+    @classmethod
+    def from_store(cls, store: Store, flight_id: str) -> ProfileContext:
+        assignments = store.profile_assignments()
+        if not assignments:
+            return cls()
+        row = store.get_flight(flight_id) or {}
+        return cls(assignments, row.get("aircraft"), store.labels_by_serial())
+
+
+def process_log(
+    log_path: str, out_dir: str, profiles: ProfileContext | None = None
+) -> dict[str, Any]:
     """Parse, analyze and write results. Runs in the child process."""
     from collections import Counter
 
@@ -34,7 +71,8 @@ def process_log(log_path: str, out_dir: str) -> dict[str, Any]:
     from flightlens.spectrum import analyze_spectrum
 
     flight = parsers.load(Path(log_path))
-    report = analyze(flight)
+    profile = profiles.resolve(flight.metadata.serial) if profiles else None
+    report = analyze(flight, profile=profile)
     out = Path(out_dir)
     if not out.is_dir():
         raise FileNotFoundError("The flight was deleted while it was being analyzed")
@@ -106,9 +144,9 @@ def _clean(obj: Any) -> Any:
     return obj
 
 
-def _child(log_path: str, out_dir: str, conn: Any) -> None:
+def _child(log_path: str, out_dir: str, profiles: ProfileContext, conn: Any) -> None:
     try:
-        conn.send(("ok", process_log(log_path, out_dir)))
+        conn.send(("ok", process_log(log_path, out_dir, profiles)))
     except Exception as exc:
         from flightlens.parsers import ParseError
 
@@ -154,7 +192,12 @@ class JobRunner:
         parent, child = self._ctx.Pipe(duplex=False)
         proc = self._ctx.Process(
             target=_child,
-            args=(str(original), str(self.store.flight_dir(flight_id)), child),
+            args=(
+                str(original),
+                str(self.store.flight_dir(flight_id)),
+                ProfileContext.from_store(self.store, flight_id),
+                child,
+            ),
             daemon=True,
         )
         proc.start()

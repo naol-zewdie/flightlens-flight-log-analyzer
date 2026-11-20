@@ -49,11 +49,64 @@ report placeholder ids); a name you give always wins.
 ![An aircraft's health over time](img/aircraft-light.png#only-light)
 ![An aircraft's health over time](img/aircraft-dark.png#only-dark)
 
+## Threshold profiles
+
+The checks' defaults are community starting values. A *profile* replaces some
+of them for one aircraft and is stored with a short digest of its values; every
+report records the profile's name, source and digest, so a verdict can always be
+traced to the thresholds that produced it. Changing an aircraft's profile
+re-analyzes its flights.
+
+```yaml
+name: Quad-7
+description: heavy-lift frame, stiffer mounts
+checks:
+  vibration.level: {attention: 25, problem: 45}
+  battery.sag: {attention: 3.55}
+```
+
+A profile is refused if it names an unknown check or setting, or puts an
+attention threshold beyond its problem threshold.
+
+**Learned profiles.** FlightLens can learn *attention* thresholds from an
+aircraft's own flights that had no Problem verdict (at least 4), using the
+per-flight metric that measures the same quantity:
+
+| Threshold | Learned from |
+|---|---|
+| `vibration.level` attention (`px4_attention` on PX4) | 95th percentile vibration in the air |
+| `motor.imbalance` attention | motor spread in steady hover |
+| `battery.sag` attention | 1st percentile volts per cell in the air |
+
+The value is the aircraft's median plus the same margin the drift alerts use
+(the larger of the metric's minimum change and 3 robust standard deviations).
+It is then kept within a safe range: never tighter than half way from the
+default to zero, and never closer than 10% to the default problem threshold.
+Problem thresholds are never learned. A learned profile therefore notices when
+*this* aircraft vibrates more than it usually does, long before the generic
+limit, without ever hiding a real problem.
+
+Learn one on the Aircraft page, or from the command line:
+
+```bash
+flightlens profile learn logs/quad7 --name Quad-7 --out quad7.yaml
+flightlens analyze new-flight.bin --profile quad7.yaml
+```
+
+## Comparing flights
+
+The Compare page overlays two flights on the signals they share, with time
+measured from each flight's first takeoff (or arming, when no takeoff was
+detected), next to the change in each health metric and which findings are new,
+gone or present in both. Open it from two selected flights in the library, from
+"Compare with #n" in an aircraft's flight list, or "Compare…" on a flight, which
+picks the previous flight of the same aircraft.
+
 ## Storage
 
 | What | Where |
 |---|---|
-| Flight index, jobs, aircraft names, trend metrics | SQLite (`data/flightlens.db`), migrated in place on upgrade |
+| Flight index, jobs, aircraft names, trend metrics, threshold profiles | SQLite (`data/flightlens.db`), migrated in place on upgrade |
 | Original logs | `data/flights/<id>/`, unchanged |
 | Signals | one Parquet file per signal, zstd |
 | Report, spectrum | JSON next to the signals |

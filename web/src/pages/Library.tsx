@@ -32,6 +32,9 @@ export function Library() {
   const [verdict, setVerdict] = useState<Verdict | "">("");
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [dragging, setDragging] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
+  const pick = (id: string) =>
+    setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p.slice(-1), id]));
   const input = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
@@ -176,6 +179,16 @@ export function Library() {
               onChange={(e) => setQ(e.target.value)}
               aria-label="Search flights"
             />
+            {picked.length > 0 && (
+              <button
+                className="btn"
+                disabled={picked.length !== 2}
+                title={picked.length === 2 ? "Overlay the two flights aligned at takeoff" : "Select one more flight"}
+                onClick={() => navigate(`/compare?a=${picked[0]}&b=${picked[1]}`)}
+              >
+                Compare {picked.length}/2
+              </button>
+            )}
             <div className="segmented" role="group" aria-label="Filter by verdict">
               {FILTERS.map((f) => (
                 <button key={f.label} aria-pressed={verdict === f.value} onClick={() => setVerdict(f.value)}>
@@ -189,6 +202,7 @@ export function Library() {
             <table className="data">
               <thead>
                 <tr>
+                  <th className="row-check"><span className="sr-only">Select</span></th>
                   <th>Verdict</th>
                   <th>Flight</th>
                   <th>Aircraft</th>
@@ -202,6 +216,7 @@ export function Library() {
               <tbody>
                 {uploads.map((u) => (
                   <tr key={u.key}>
+                    <td className="row-check" />
                     <td>
                       {u.phase === "failed" ? (
                         <span className="pill problem">Failed</span>
@@ -234,6 +249,17 @@ export function Library() {
                     onClick={() => navigate(`/flights/${f.id}`)}
                     onKeyDown={(e) => e.key === "Enter" && navigate(`/flights/${f.id}`)}
                   >
+                    <td className="row-check" onClick={(e) => e.stopPropagation()}>
+                      {f.status === "done" && (
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${f.filename} to compare`}
+                          checked={picked.includes(f.id)}
+                          onChange={() => pick(f.id)}
+                          onKeyDown={(e) => e.stopPropagation()}
+                        />
+                      )}
+                    </td>
                     <td>
                       {f.status === "done" ? (
                         <VerdictPill verdict={f.verdict} />
@@ -266,7 +292,7 @@ export function Library() {
                 ))}
                 {flights?.length === 0 && uploads.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="empty">
+                    <td colSpan={9} className="empty">
                       No flights match.
                     </td>
                   </tr>

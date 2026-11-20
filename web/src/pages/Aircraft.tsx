@@ -4,6 +4,7 @@ import uPlot from "uplot";
 import { api, type AircraftDetail, type AircraftSummary, type MetricSeries } from "../api";
 import { useReadOnly } from "../components/server";
 import { SevIcon, VerdictPill } from "../components/Severity";
+import { Thresholds } from "../components/Thresholds";
 import { cssVar, useThemeVersion } from "../components/theme";
 import { fmtDate, fmtNum } from "../format";
 
@@ -204,11 +205,13 @@ export function AircraftPage() {
         </div>
       </section>
 
+      <Thresholds a={a} readOnly={readOnly} onChanged={load} />
+
       <section className="card table-wrap" style={{ marginTop: 16 }} aria-label="Flights">
         <div className="card-head"><h2>Flights</h2></div>
         <table className="data" style={{ marginTop: 8 }}>
           <thead>
-            <tr><th className="r">#</th><th>Verdict</th><th>Flight</th><th>Date</th><th>Firmware</th><th className="r">Score</th></tr>
+            <tr><th className="r">#</th><th>Verdict</th><th>Flight</th><th>Date</th><th>Firmware</th><th className="r">Score</th><th /></tr>
           </thead>
           <tbody>
             {a.flight_list.map((f, i) => (
@@ -220,6 +223,15 @@ export function AircraftPage() {
                 <td className="muted">{fmtDate(f.start_time, f.uploaded_at)}</td>
                 <td className="muted">{f.firmware ?? "—"}</td>
                 <td className="r num">{f.score ?? "—"}</td>
+                <td className="r" onClick={(e) => e.stopPropagation()}>
+                  {i > 0 && (
+                    <Link to={`/compare?a=${a.flight_list[i - 1].id}&b=${f.id}`} className="hint"
+                      style={{ color: "var(--accent-ink)", whiteSpace: "nowrap" }}
+                      title="Overlay with the previous flight, aligned at takeoff">
+                      Compare with #{i}
+                    </Link>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

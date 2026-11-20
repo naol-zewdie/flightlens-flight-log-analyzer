@@ -28,6 +28,7 @@ from flightlens.checks import all_checks
 from flightlens.engine import Report, Verdict, analyze
 from flightlens.intervals import format_time
 from flightlens.model import Finding, Severity
+from flightlens.profiles import Profile, ProfileError, learn_profile, load_profile
 from flightlens.summary import summarize
 
 EXIT_CANNOT_ANALYZE = 3
@@ -39,8 +40,20 @@ app = typer.Typer(
     no_args_is_help=True,
     help="Automatic drone flight log analysis.",
 )
+profile_app = typer.Typer(
+    no_args_is_help=True, help="Threshold profiles: per-aircraft threshold overrides."
+)
+app.add_typer(profile_app, name="profile")
 console = Console(highlight=False)
 err_console = Console(stderr=True, highlight=False)
+
+ProfileOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--profile",
+        help="Threshold profile (.yaml) to use instead of the default thresholds.",
+    ),
+]
 
 _SEVERITY_STYLE: dict[Severity, tuple[str, str, str, str]] = {
     # icon, plain-text icon, label, style; colour is never the only cue
@@ -78,15 +91,29 @@ def _load_or_exit(log: Path) -> Any:
         raise typer.Exit(EXIT_CANNOT_ANALYZE) from None
 
 
+def _profile_or_exit(path: Path | None) -> Profile | None:
+    if path is None:
+        return None
+    try:
+        return load_profile(path)
+    except OSError as exc:
+        err_console.print(f"[red]error:[/] cannot read profile {path}: {exc}")
+    except ProfileError as exc:
+        err_console.print(f"[red]error:[/] profile {path.name}: {exc}")
+    raise typer.Exit(EXIT_USAGE)
+
+
 @app.command("analyze")
 def analyze_cmd(
     log: Annotated[Path, typer.Argument(help="Path to a PX4 .ulg or ArduPilot .bin log.")],
     json_out: Annotated[
         Path | None, typer.Option("--json", help="Also write the report as JSON.")
     ] = None,
+    profile_path: ProfileOption = None,
 ) -> None:
     """Analyze a flight log and print the verdict and findings."""
-    report = analyze(_load_or_exit(log))
+    profile = _profile_or_exit(profile_path)
+    report = analyze(_load_or_exit(log), profile=profile)
     render_report(report, console)
 
     if json_out is not None:
@@ -128,12 +155,13 @@ def batch_cmd(
     csv_out: Annotated[
         Path | None, typer.Option("--csv", help="Write one row per log to this CSV file.")
     ] = None,
+    profile_path: ProfileOption = None,
 ) -> None:
     """Analyze every log in a folder and summarize how the system behaved."""
-    files = sorted(p for p in folder.rglob("*") if p.suffix.lower() in LOG_SUFFIXES)
-    if not files:
-        err_console.print(f"[red]error:[/] no .ulg, .bin or .tlog files in {folder}")
-        raise typer.Exit(EXIT_CANNOT_ANALYZE)
+    profile = _profile_or_exit(profile_path)
+    files = _log_files(folder)
+    if profile:
+        console.print(f"Thresholds: profile {profile.name} ({profile.source}, {profile.digest})")
 
     rows: list[dict[str, Any]] = []
     not_evaluated: Counter[str] = Counter()
@@ -142,7 +170,7 @@ def batch_cmd(
         t0 = time.perf_counter()
         try:
             flight = parsers.load(path)
-            report = analyze(flight)
+            report = analyze(flight, profile=profile)
         except parsers.ParseError as exc:
             row.update(status="rejected", detail=str(exc))
         except Exception as exc:  # a crash is a bug to fix, not a verdict
@@ -181,6 +209,86 @@ def batch_cmd(
             writer.writeheader()
             writer.writerows(rows)
         console.print(f"CSV written to {csv_out}")
+
+
+def _log_files(folder: Path) -> list[Path]:
+    files = sorted(p for p in folder.rglob("*") if p.suffix.lower() in LOG_SUFFIXES)
+    if not files:
+        err_console.print(f"[red]error:[/] no .ulg, .bin or .tlog files in {folder}")
+        raise typer.Exit(EXIT_CANNOT_ANALYZE)
+    return files
+
+
+@profile_app.command("learn")
+def profile_learn_cmd(
+    folder: Annotated[
+        Path, typer.Argument(help="Folder with one aircraft's logs (searched recursively).")
+    ],
+    name: Annotated[str, typer.Option("--name", help="Name of the profile.")],
+    out: Annotated[Path, typer.Option("--out", help="Write the profile to this .yaml file.")],
+) -> None:
+    """Learn attention thresholds from one aircraft's own flights.
+
+    Uses only flights without a Problem verdict. Learned values never reach the
+    default problem thresholds; problem thresholds are never learned.
+    """
+    from flightlens.metrics import flight_metrics
+
+    rows: list[dict[str, Any]] = []
+    for path in _log_files(folder):
+        try:
+            flight = parsers.load(path)
+        except parsers.ParseError as exc:
+            err_console.print(f"[dim]skipped {path.name}: {exc}[/]")
+            continue
+        report = analyze(flight)
+        rows.append(
+            {
+                "id": path.name,
+                "verdict": report.verdict.value,
+                "log_format": flight.metadata.log_format,
+                "metrics": flight_metrics(flight, report),
+            }
+        )
+    try:
+        profile = learn_profile(name, rows, notes=f"Learned from {len(rows)} logs in {folder.name}")
+    except ProfileError as exc:
+        err_console.print(f"[red]error:[/] {exc}")
+        raise typer.Exit(EXIT_CANNOT_ANALYZE) from None
+    table = Table(box=None, header_style="bold", pad_edge=False, padding=(0, 2, 0, 0))
+    for col in ("Threshold", "Default", "Learned", "Median", "Flights", ""):
+        table.add_column(col, justify="left" if col in ("Threshold", "") else "right")
+    for key, b in (profile.basis or {}).get("values", {}).items():
+        cid, setting = key.rsplit(".", 1)
+        table.add_row(
+            key,
+            f"{b['default']:g}",
+            f"{profile.overrides[cid][setting]:g}",
+            f"{b['median']:g}",
+            str(b["flights"]),
+            Text("clamped", style="yellow") if b["clamped"] else "",
+        )
+    console.print(table)
+    try:
+        out.write_text(profile.to_yaml(), encoding="utf-8")
+    except OSError as exc:
+        err_console.print(f"[red]error:[/] cannot write {out}: {exc}")
+        raise typer.Exit(EXIT_CANNOT_ANALYZE) from None
+    console.print(f"Profile {profile.name} ({profile.digest}) written to {out}")
+
+
+@profile_app.command("show")
+def profile_show_cmd(
+    path: Annotated[Path, typer.Argument(help="Profile .yaml file.")],
+) -> None:
+    """Check a profile file and list what it changes against the defaults."""
+    profile = _profile_or_exit(path)
+    assert profile is not None
+    defaults = {c.id: c.defaults for c in all_checks()}
+    console.print(f"{profile.name} · {profile.source} · {profile.digest}")
+    for cid, values in profile.overrides.items():
+        for key, value in values.items():
+            console.print(f"  {cid}.{key}: {defaults[cid][key]:g} → {value:g}")
 
 
 def _print_batch_row(row: dict[str, Any]) -> None:
@@ -238,9 +346,12 @@ def validate_cmd(
     title: Annotated[
         str, typer.Option(help="Title of the Markdown report.")
     ] = "Validation results",
+    profile_path: ProfileOption = None,
 ) -> None:
     """Score FlightLens against logs with known outcomes (exit 1 if any log is wrong)."""
     from flightlens import validate
+
+    profile = _profile_or_exit(profile_path)
 
     files = validate.find_manifests(manifests)
     try:
@@ -254,7 +365,7 @@ def validate_cmd(
 
     outcomes = []
     for case in cases:
-        o = validate.evaluate(case)
+        o = validate.evaluate(case, config=profile.overrides if profile else None)
         outcomes.append(o)
         mark = Text("PASS ", style="green") if o.passed else Text("FAIL ", style="bold red")
         mark.append(f"{case.id:<44} ")
@@ -453,6 +564,7 @@ def render_report(report: Report, out: Console) -> None:
             md.firmware,
             md.vehicle_type,
             _time_text(report, summ),
+            f"profile {report.profile.name}" if report.profile else None,
         )
         if p
     )

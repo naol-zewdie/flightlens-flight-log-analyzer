@@ -1,39 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, type SeriesData, type SignalInfo } from "../api";
+import { api, type SeriesData } from "../api";
 import { Chart, type Series } from "../components/Chart";
+import { chartGroups, DEFAULT_SIGNALS, groupOf, pickerGroups } from "../signals";
 import { useFlight } from "./FlightPage";
 import { SERIES_COLORS } from "./Overview";
-
-const SUBSYSTEMS: [string, string][] = [
-  ["att", "Attitude"],
-  ["rate", "Angular rate"],
-  ["vibe", "Vibration"],
-  ["mot", "Motors"],
-  ["pusher", "Motors"],
-  ["ctrl", "Control"],
-  ["bat", "Battery"],
-  ["power", "Power"],
-  ["gps", "GPS"],
-  ["pos", "Position"],
-  ["ekf", "Estimator"],
-  ["rc", "Radio"],
-  ["state", "Flight state"],
-];
-const groupOf = (name: string) => SUBSYSTEMS.find(([p]) => name.split(".")[0] === p)?.[1] ?? "Other";
-const DEFAULTS = ["att.roll", "att.des_roll", "vibe.metric", "vibe.z", "bat.volt", "mot.1", "mot.2", "mot.3", "mot.4"];
-
-/** Charts by subsystem and unit, at most four series each (one y axis per chart). */
-function chartGroups(names: string[], catalog: Map<string, SignalInfo>): string[][] {
-  const by = new Map<string, string[]>();
-  for (const n of names) {
-    const key = `${groupOf(n)}|${catalog.get(n)?.unit ?? ""}`;
-    by.set(key, [...(by.get(key) ?? []), n]);
-  }
-  const out: string[][] = [];
-  for (const list of by.values()) for (let i = 0; i < list.length; i += 4) out.push(list.slice(i, i + 4));
-  return out;
-}
 
 export function SignalsView() {
   const { flight, report, events, cursor, setCursor } = useFlight();
@@ -41,7 +12,7 @@ export function SignalsView() {
   const [params, setParams] = useSearchParams();
   const selected = useMemo(() => {
     const fromUrl = params.get("s")?.split(",").filter((n) => catalog.has(n));
-    return fromUrl?.length ? fromUrl : DEFAULTS.filter((n) => catalog.has(n));
+    return fromUrl?.length ? fromUrl : DEFAULT_SIGNALS.filter((n) => catalog.has(n));
   }, [params, catalog]);
   const [filter, setFilter] = useState("");
   const [range, setRange] = useState<[number, number] | null>(null);
@@ -73,15 +44,7 @@ export function SignalsView() {
     setParams(next.length ? { s: next.join(",") } : {}, { replace: true });
   };
 
-  const groups = useMemo(() => {
-    const g = new Map<string, SignalInfo[]>();
-    for (const s of report.signals) {
-      if (filter && !s.name.includes(filter.toLowerCase())) continue;
-      const k = groupOf(s.name);
-      g.set(k, [...(g.get(k) ?? []), s]);
-    }
-    return g;
-  }, [report.signals, filter]);
+  const groups = useMemo(() => pickerGroups(report.signals, filter), [report.signals, filter]);
 
   const modeBands = useMemo(() => {
     const modes = events.filter((e) => e.kind === "mode");

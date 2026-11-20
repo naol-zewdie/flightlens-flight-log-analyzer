@@ -2,13 +2,14 @@
 
 export function fmtTime(s: number | null | undefined): string {
   if (s == null || !Number.isFinite(s)) return "—";
-  const total = Math.round(s);
+  const total = Math.round(Math.abs(s));
+  const sign = s < 0 && total > 0 ? "−" : ""; // before takeoff on aligned comparisons
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
   const sec = total % 60;
   const mm = String(m).padStart(2, "0");
   const ss = String(sec).padStart(2, "0");
-  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+  return sign + (h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`);
 }
 
 export function fmtDuration(s: number | null | undefined): string {

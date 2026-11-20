@@ -87,6 +87,12 @@ export function FlightPage() {
             {flight.hardware && <span>{flight.hardware}</span>}
             {flight.firmware && <span>{flight.firmware}</span>}
             <span>{fmtDate(flight.start_time, flight.uploaded_at)}</span>
+            {flight.status === "done" && (
+              <Link to={`/compare?a=${flight.id}`} style={{ color: "var(--accent-ink)" }}
+                title="Overlay with another flight (by default the previous flight of this aircraft)">
+                Compare…
+              </Link>
+            )}
           </div>
         </div>
         {flight.status === "done" && verdict && (

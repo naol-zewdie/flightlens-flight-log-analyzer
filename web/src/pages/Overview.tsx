@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type Finding, type SeriesData } from "../api";
+import { aircraftKey, api, profileLabel, type Finding, type SeriesData } from "../api";
 import { Chart, type Series } from "../components/Chart";
 import { SevIcon, SevLabel } from "../components/Severity";
 import { Timeline } from "../components/Timeline";
@@ -53,7 +53,17 @@ export function Overview() {
         <section className="card" aria-label="Findings">
           <div className="card-head">
             <h2>Findings</h2>
-            <span className="hint">most serious first · j/k</span>
+            {report.profile ? (
+              <Link
+                className="chip"
+                to={aircraftKey(flight) ? `/aircraft/${encodeURIComponent(aircraftKey(flight)!)}` : "#"}
+                title={`Judged with threshold profile ${report.profile.name} (${report.profile.digest}) instead of the defaults`}
+              >
+                Thresholds: {profileLabel(report.profile)}
+              </Link>
+            ) : (
+              <span className="hint">most serious first · j/k</span>
+            )}
           </div>
           {issues.length === 0 ? (
             <div className="card-body muted">

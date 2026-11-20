@@ -27,6 +27,8 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from flightlens.profiles import Profile
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS flights (
     id            TEXT PRIMARY KEY,
@@ -57,6 +59,18 @@ CREATE TABLE IF NOT EXISTS jobs (
     error       TEXT,
     created_at  REAL NOT NULL,
     updated_at  REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS profiles (
+    name        TEXT PRIMARY KEY,
+    source      TEXT NOT NULL,        -- user | learned | file
+    overrides   TEXT NOT NULL,        -- JSON {check_id: {key: value}}
+    notes       TEXT,
+    basis       TEXT,                 -- JSON, learned profiles only
+    created_at  REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS aircraft_profiles (
+    aircraft_key  TEXT PRIMARY KEY,   -- fleet.aircraft_key: label:<name> or sn:<serial>
+    profile_name  TEXT NOT NULL REFERENCES profiles(name) ON DELETE CASCADE ON UPDATE CASCADE
 );
 """
 
@@ -295,6 +309,76 @@ class Store:
             self._db.commit()
         return cur.rowcount > 0
 
+    # --- threshold profiles ----------------------------------------------------
+
+    def list_profiles(self) -> list[Profile]:
+        with self._lock:
+            rows = self._db.execute("SELECT * FROM profiles ORDER BY name").fetchall()
+        return [_profile(r) for r in rows]
+
+    def get_profile(self, name: str) -> Profile | None:
+        with self._lock:
+            row = self._db.execute("SELECT * FROM profiles WHERE name=?", (name,)).fetchone()
+        return _profile(row) if row else None
+
+    def save_profile(self, profile: Profile) -> None:
+        """Create or replace a profile (by name); assignments are kept."""
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO profiles (name, source, overrides, notes, basis, created_at) "
+                "VALUES (?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET source=excluded.source, "
+                "overrides=excluded.overrides, notes=excluded.notes, basis=excluded.basis, "
+                "created_at=excluded.created_at",
+                (
+                    profile.name,
+                    profile.source,
+                    json.dumps(profile.overrides, sort_keys=True),
+                    profile.notes,
+                    json.dumps(profile.basis) if profile.basis else None,
+                    time.time(),
+                ),
+            )
+            self._db.commit()
+
+    def delete_profile(self, name: str) -> bool:
+        """Delete a profile; aircraft that used it go back to the defaults."""
+        with self._lock:
+            cur = self._db.execute("DELETE FROM profiles WHERE name=?", (name,))
+            self._db.commit()
+        return cur.rowcount > 0
+
+    def assign_profile(self, aircraft_key: str, name: str | None) -> None:
+        with self._lock:
+            if name is None:
+                self._db.execute(
+                    "DELETE FROM aircraft_profiles WHERE aircraft_key=?", (aircraft_key,)
+                )
+            else:
+                self._db.execute(
+                    "INSERT INTO aircraft_profiles VALUES (?,?) ON CONFLICT(aircraft_key) "
+                    "DO UPDATE SET profile_name=excluded.profile_name",
+                    (aircraft_key, name),
+                )
+            self._db.commit()
+
+    def profile_assignments(self) -> dict[str, Profile]:
+        """Aircraft key to its assigned profile."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT a.aircraft_key, p.* FROM aircraft_profiles a "
+                "JOIN profiles p ON p.name = a.profile_name"
+            ).fetchall()
+        return {r["aircraft_key"]: _profile(r) for r in rows}
+
+    def labels_by_serial(self) -> dict[str, str]:
+        """Board serial to the name the user gave that aircraft (latest wins)."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT serial, aircraft FROM flights WHERE serial IS NOT NULL "
+                "AND aircraft IS NOT NULL ORDER BY uploaded_at"
+            ).fetchall()
+        return {r["serial"]: r["aircraft"] for r in rows}
+
     # --- analysis results ------------------------------------------------------
 
     def read_report(self, flight_id: str) -> dict[str, Any] | None:
@@ -319,6 +403,16 @@ class Store:
         t = table.column("t").to_numpy()
         v = table.column("v").to_numpy(zero_copy_only=False).astype(np.float64)
         return t, v
+
+
+def _profile(row: sqlite3.Row) -> Profile:
+    return Profile(
+        name=row["name"],
+        overrides=json.loads(row["overrides"]),
+        source=row["source"],
+        notes=row["notes"] or "",
+        basis=json.loads(row["basis"]) if row["basis"] else None,
+    )
 
 
 def write_signals(directory: Path, signals: dict[str, Any]) -> None:

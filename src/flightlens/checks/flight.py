@@ -50,7 +50,7 @@ TAKEOFF_MODES = ("takeoff", "auto", "mission", "vtol takeoff")
 class FlightCrash:
     id = "flight.crash"
     title = "Crash or hard landing"
-    version = "1.0.0"
+    version = "1.1.0"
     required_signals = ("att.roll", "att.pitch")
     defaults = {
         "upset_roll_deg": 90.0,
@@ -197,7 +197,7 @@ def _evidence(flight: Flight) -> tuple[str, ...]:
 class Takeoff:
     id = "flight.takeoff"
     title = "Takeoff"
-    version = "1.0.0"
+    version = "1.1.0"
     required_signals = ("pos.rel_alt",)
     defaults = {"command_level": 0.5, "command_s": 3.0}
 

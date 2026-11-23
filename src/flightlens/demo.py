@@ -18,7 +18,8 @@ import tempfile
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
-from flightlens.sim.benchmark import Fault, copter
+from flightlens import parsers
+from flightlens.sim.benchmark import Fault, _as_tlog, copter
 from flightlens.sim.plane import plane_log
 from flightlens.store import Store
 from flightlens.worker import process_log
@@ -41,6 +42,10 @@ DEMO: dict[str, Maker] = {
     "quad-08-motor-failure.bin": _quad(7, Fault("motor_failure", 60, 80)),
     "quad-09-arming-refused.bin": _quad(8, Fault("arming_refused")),
     "quad-10-vibration.bin": _quad(9, Fault("vibration", 60, 140, 75)),
+    # the next flight as the ground station recorded it over the radio
+    "quad-11-telemetry.tlog": lambda p: _as_tlog(
+        p, copter(p.with_suffix(".bin"), Fault("vibration", 60, 90, 42), 7, day=10)
+    ),
     "plane-01-healthy.bin": lambda p: plane_log(p, "smooth", day=0),
     "plane-02-out-of-trim.bin": lambda p: plane_log(p, "smooth", trim=-0.2, day=2),
     "plane-03-hard-landing.bin": lambda p: plane_log(p, "hard", day=4),
@@ -63,7 +68,8 @@ def seed(
                 continue
             path = make(Path(tmp) / filename)
             sha = hashlib.sha256(path.read_bytes()).hexdigest()
-            created = store.create_flight(path, sha, filename, "dataflash")
+            fmt = parsers.detect_format(path).value
+            created = store.create_flight(path, sha, filename, fmt)
             if created is None:
                 existing = store.find_by_sha(sha)
                 if existing:

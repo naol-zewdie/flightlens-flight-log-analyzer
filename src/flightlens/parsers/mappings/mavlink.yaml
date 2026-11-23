@@ -1,0 +1,170 @@
+# MAVLink telemetry (.tlog) field -> FlightLens signal mapping.
+#
+# topic = MAVLink message name, field = its field (arrays as name[i]).
+# The first source present wins. min_valid / max_valid apply to the raw value,
+# before scale: MAVLink marks "unknown" with UINT16_MAX, UINT8_MAX or -1.
+#
+# Telemetry is what the ground station received: usually 1-10 Hz per message
+# (ArduPilot SRn_* / PX4 MAV_*_RATE parameters), with radio dropouts. Checks
+# that need high-rate data (noise spectrum, rate-loop tuning) do not run.
+#
+# Signals that need computation (clipping sum, landed state, motors, arming,
+# modes, PX4 attitude setpoint) are built in tlog.py.
+#
+# Bump `version` whenever a mapping changes, so reports stay traceable.
+version: "mavlink-2026.11.1"
+
+signals:
+  # Attitude (deg) and body rates (deg/s)
+  - name: att.roll
+    unit: deg
+    sources: [{ topic: ATTITUDE, field: roll, scale: 57.29577951308232 }]
+  - name: att.pitch
+    unit: deg
+    sources: [{ topic: ATTITUDE, field: pitch, scale: 57.29577951308232 }]
+  - name: att.yaw
+    unit: deg
+    sources: [{ topic: ATTITUDE, field: yaw, scale: 57.29577951308232 }]
+  - name: rate.roll
+    unit: deg/s
+    sources: [{ topic: ATTITUDE, field: rollspeed, scale: 57.29577951308232 }]
+  - name: rate.pitch
+    unit: deg/s
+    sources: [{ topic: ATTITUDE, field: pitchspeed, scale: 57.29577951308232 }]
+  - name: rate.yaw
+    unit: deg/s
+    sources: [{ topic: ATTITUDE, field: yawspeed, scale: 57.29577951308232 }]
+  # ArduPilot sends its attitude targets as NAV_CONTROLLER_OUTPUT (deg)
+  - name: att.des_roll
+    unit: deg
+    sources: [{ topic: NAV_CONTROLLER_OUTPUT, field: nav_roll }]
+  - name: att.des_pitch
+    unit: deg
+    sources: [{ topic: NAV_CONTROLLER_OUTPUT, field: nav_pitch }]
+
+  # Position and velocity (estimator)
+  - name: pos.lat
+    unit: deg
+    sources: [{ topic: GLOBAL_POSITION_INT, field: lat, scale: 1.0e-7, zero_is_missing: true }]
+  - name: pos.lon
+    unit: deg
+    sources: [{ topic: GLOBAL_POSITION_INT, field: lon, scale: 1.0e-7, zero_is_missing: true }]
+  - name: pos.alt
+    unit: m
+    sources: [{ topic: GLOBAL_POSITION_INT, field: alt, scale: 0.001 }]
+  - name: pos.rel_alt
+    unit: m
+    sources: [{ topic: GLOBAL_POSITION_INT, field: relative_alt, scale: 0.001 }]
+  - name: pos.vx
+    unit: m/s
+    sources: [{ topic: GLOBAL_POSITION_INT, field: vx, scale: 0.01 }]
+  - name: pos.vy
+    unit: m/s
+    sources: [{ topic: GLOBAL_POSITION_INT, field: vy, scale: 0.01 }]
+  - name: pos.climb
+    unit: m/s
+    sources: [{ topic: GLOBAL_POSITION_INT, field: vz, scale: -0.01 }]
+
+  # GPS receiver
+  - name: gps.lat
+    unit: deg
+    sources: [{ topic: GPS_RAW_INT, field: lat, scale: 1.0e-7, zero_is_missing: true }]
+  - name: gps.lon
+    unit: deg
+    sources: [{ topic: GPS_RAW_INT, field: lon, scale: 1.0e-7, zero_is_missing: true }]
+  - name: gps.alt
+    unit: m
+    sources: [{ topic: GPS_RAW_INT, field: alt, scale: 0.001 }]
+  - name: gps.nsats
+    unit: count
+    sources: [{ topic: GPS_RAW_INT, field: satellites_visible, max_valid: 254 }]
+  - name: gps.hdop
+    unit: ""
+    sources: [{ topic: GPS_RAW_INT, field: eph, scale: 0.01, max_valid: 65534 }]
+  - name: gps.fix
+    unit: enum
+    sources: [{ topic: GPS_RAW_INT, field: fix_type }]
+  - name: gps.speed
+    unit: m/s
+    sources: [{ topic: GPS_RAW_INT, field: vel, scale: 0.01, max_valid: 65534 }]
+
+  # Battery
+  - name: bat.volt
+    unit: V
+    sources:
+      - { topic: SYS_STATUS, field: voltage_battery, scale: 0.001, max_valid: 65534, zero_is_missing: true }
+  - name: bat.curr
+    unit: A
+    sources: [{ topic: SYS_STATUS, field: current_battery, scale: 0.01, min_valid: 0 }]
+  - name: bat.remaining
+    unit: fraction
+    sources: [{ topic: SYS_STATUS, field: battery_remaining, scale: 0.01, min_valid: 0, max_valid: 100 }]
+  - name: bat.used_mah
+    unit: mAh
+    sources: [{ topic: BATTERY_STATUS, field: current_consumed, min_valid: 0 }]
+
+  # Vibration (m/s²)
+  - name: vibe.x
+    unit: m/s²
+    sources: [{ topic: VIBRATION, field: vibration_x }]
+  - name: vibe.y
+    unit: m/s²
+    sources: [{ topic: VIBRATION, field: vibration_y }]
+  - name: vibe.z
+    unit: m/s²
+    sources: [{ topic: VIBRATION, field: vibration_z }]
+
+  # Estimator test ratios: ArduPilot EKF_STATUS_REPORT, PX4 ESTIMATOR_STATUS
+  - name: ekf.vel
+    unit: ratio
+    sources:
+      - { topic: EKF_STATUS_REPORT, field: velocity_variance, min_valid: 0 }
+      - { topic: ESTIMATOR_STATUS, field: vel_ratio, min_valid: 0 }
+  - name: ekf.pos
+    unit: ratio
+    sources:
+      - { topic: EKF_STATUS_REPORT, field: pos_horiz_variance, min_valid: 0 }
+      - { topic: ESTIMATOR_STATUS, field: pos_horiz_ratio, min_valid: 0 }
+  - name: ekf.hgt
+    unit: ratio
+    sources:
+      - { topic: EKF_STATUS_REPORT, field: pos_vert_variance, min_valid: 0 }
+      - { topic: ESTIMATOR_STATUS, field: pos_vert_ratio, min_valid: 0 }
+  - name: ekf.mag
+    unit: ratio
+    sources:
+      - { topic: EKF_STATUS_REPORT, field: compass_variance, min_valid: 0 }
+      - { topic: ESTIMATOR_STATUS, field: mag_ratio, min_valid: 0 }
+
+  # Magnetometer (RAW_IMU is in milligauss)
+  - name: mag.x
+    unit: G
+    sources: [{ topic: RAW_IMU, field: xmag, scale: 0.001 }]
+  - name: mag.y
+    unit: G
+    sources: [{ topic: RAW_IMU, field: ymag, scale: 0.001 }]
+  - name: mag.z
+    unit: G
+    sources: [{ topic: RAW_IMU, field: zmag, scale: 0.001 }]
+
+  # Throttle, power, radio
+  - name: ctrl.thrust
+    unit: fraction
+    sources: [{ topic: VFR_HUD, field: throttle, scale: 0.01, max_valid: 100 }]
+  - name: power.5v
+    unit: V
+    sources: [{ topic: POWER_STATUS, field: Vcc, scale: 0.001, zero_is_missing: true }]
+  - name: rc.rssi
+    unit: "%"
+    sources: [{ topic: RC_CHANNELS, field: rssi, scale: 0.3937007874015748, max_valid: 254 }]
+
+# Messages read by the computed signals in tlog.py.
+computed_topics:
+  - HEARTBEAT
+  - EXTENDED_SYS_STATE
+  - SERVO_OUTPUT_RAW
+  - STATUSTEXT
+  - PARAM_VALUE
+  - AUTOPILOT_VERSION
+  - SYSTEM_TIME
+  - ATTITUDE_TARGET

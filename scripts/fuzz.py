@@ -48,6 +48,11 @@ def seeds(tmp: Path) -> list[tuple[str, bytes]]:
         ("plane-crash.bin", plane_log(tmp / "p.bin", "crash", trim=-0.2).read_bytes()),
     ]
     out += [(p.name, p.read_bytes()) for p in sorted((ROOT / "testdata/logs").glob("*.ulg"))]
+    from flightlens import parsers
+    from flightlens.sim.telemetry import telemetry
+
+    tl = telemetry(parsers.load(tmp / "v.bin"), tmp / "v.tlog", loss=0.02, seed=3)
+    out.append(("copter-vib.tlog", tl.read_bytes()))
     return out
 
 

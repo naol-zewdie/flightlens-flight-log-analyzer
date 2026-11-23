@@ -60,6 +60,16 @@ def handled(path: Path) -> str:
 def seed_log(kind: str) -> bytes:
     if kind == "ulog":
         return (ROOT / "testdata/logs/px4-v1.6-sample-appended.ulg").read_bytes()
+    if kind == "tlog":
+        import tempfile
+
+        from flightlens import parsers
+        from flightlens.sim.benchmark import copter
+        from flightlens.sim.telemetry import telemetry
+
+        with tempfile.TemporaryDirectory() as tmp:
+            flight = parsers.load(copter(Path(tmp) / "c.bin", None, 2))
+            return telemetry(flight, Path(tmp) / "c.tlog", loss=0.02).read_bytes()
     import tempfile
 
     from flightlens.sim.plane import plane_log
@@ -92,7 +102,9 @@ def damaged(draw: st.DrawFn, kind: str) -> bytes:
     return bytes(data)
 
 
-@pytest.mark.parametrize(("kind", "suffix"), [("ulog", ".ulg"), ("dataflash", ".bin")])
+@pytest.mark.parametrize(
+    ("kind", "suffix"), [("ulog", ".ulg"), ("dataflash", ".bin"), ("tlog", ".tlog")]
+)
 def test_damaged_logs_never_crash(kind: str, suffix: str, tmp_path: Path) -> None:
     @FUZZ
     @given(damaged(kind))

@@ -2,7 +2,9 @@
 
 Signals: ``gps.nsats``, ``gps.hdop``, ``gps.fix`` (fix type; 3 = 3D fix).
 
-Method: while armed, the worst condition held for at least 5 s.
+Method: in the air (like every check), the worst condition held for at least
+5 s. Poor reception while still on the ground is not judged: the aircraft may
+wait for a better fix before taking off.
 Attention: fewer than 8 satellites or HDOP above 1.4.
 Problem: fewer than 6 satellites, HDOP above 2.5, or loss of 3D fix for 2 s.
 
@@ -15,7 +17,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from flightlens.checks._util import held_windows
+from flightlens.checks._util import held_windows, in_air_mask
 from flightlens.checks.base import register
 from flightlens.model import CheckConfig, Finding, Flight, Severity
 
@@ -29,7 +31,7 @@ _RECOMMENDATION = (
 class GpsQuality:
     id = "gps.quality"
     title = "GPS quality"
-    version = "1.0.0"
+    version = "1.1.0"
     required_signals = ("gps.nsats", "gps.hdop", "gps.fix")
     defaults = {
         "sats_attention": 8.0,
@@ -54,14 +56,14 @@ class GpsQuality:
                 )
             ]
         t = fix.t
-        armed = flight.armed_mask(t)
+        armed = in_air_mask(flight, t)
         if armed.sum() < 2:
             return [
                 Finding(
                     self.id,
                     Severity.NOT_EVALUATED,
                     "GPS not evaluated",
-                    "No GPS samples while armed.",
+                    "No GPS samples while in the air.",
                     evidence_signals=self.required_signals,
                 )
             ]

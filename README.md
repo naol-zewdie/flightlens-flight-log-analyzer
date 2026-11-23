@@ -14,7 +14,7 @@ Verdict: PROBLEM   (health score 10/100)
 ✔ OK         Attitude tracking, Estimator health, Errors and failsafes, GPS quality, ...
 ```
 
-**Status:** PX4 `.ulg` and ArduPilot `.bin` logs are supported end to end (CLI, web app, Docker), with the same checks and report for both. Validated on 28 real public PX4 logs, 15 real ArduPlane logs, 8 PX4 SITL sessions and a 41-log fault benchmark ([docs/validation.md](docs/validation.md)). MAVLink `.tlog` is next.
+**Status:** PX4 `.ulg`, ArduPilot `.bin` and MAVLink telemetry `.tlog` logs (from either firmware, as Mission Planner or QGroundControl record them) are supported end to end (CLI, web app, Docker), with the same checks and report for all. Validated on 28 real public PX4 logs, 15 real ArduPlane logs, 8 PX4 SITL sessions and a 46-log fault benchmark ([docs/validation.md](docs/validation.md)).
 
 ![FlightLens: a crash diagnosed with its likely causes and the evidence](docs/img/crash-light.png)
 
@@ -102,7 +102,7 @@ Every claim is checked against logs with a known outcome, using one label format
 
 | Set | Logs | Result |
 |---|---|---|
-| Fault benchmark (generated, one injected fault each, healthy flights near every limit) | 41 | 41 fully correct, 22 checks, 0 false alarms: [docs/validation.md](docs/validation.md) |
+| Fault benchmark (generated, one injected fault each, healthy flights near every limit) | 46 (5 as telemetry logs) | 46 fully correct, 22 checks, 0 false alarms: [docs/validation.md](docs/validation.md) |
 | Real ArduPlane crashes (owner's logs, not committed) | 15 | crashes and hard landings found with causes: [docs/real-log-results.md](docs/real-log-results.md) |
 | PX4 SITL sessions that never flew | 8 | arming refusals and failed takeoffs explained |
 | Public PX4 logs (Flight Review) | 28 | calibration set for the thresholds |
@@ -112,9 +112,10 @@ The benchmark runs in CI, so a threshold or logic regression fails the build. It
 ## How it works
 
 ```
-.ulg / .bin  →  parser + versioned mapping table  →  common data model  →  checks  →  findings  →  verdict
+.ulg / .bin / .tlog  →  parser + versioned mapping table  →  common data model  →  checks  →  findings  →  verdict
 ```
 
+- **Telemetry logs** (`.tlog`) are what the ground station received over the radio, usually at 1-10 Hz with dropouts: the checks that work on such data run (vibration, battery, GPS, estimator, failsafes, crash, arming...), the ones that need the onboard log's high-rate data (noise spectrum, rate-loop tuning) say so. FlightLens decodes MAVLink itself; its message definitions are tested against pymavlink.
 - **Common data model** ([model.py](src/flightlens/model.py)): signals named in one vocabulary (`vibe.metric`, `bat.volt`, …), events, parameters, armed segments and data-quality issues. Firmware-specific names live only in [mappings/px4.yaml](src/flightlens/parsers/mappings/px4.yaml) and [mappings/ardupilot.yaml](src/flightlens/parsers/mappings/ardupilot.yaml).
 - **Honest results:** a check without data is *not evaluated*, never OK. A flight is called *healthy* only if at least 3 checks actually ran and it was armed for at least 10 s; otherwise the verdict is *insufficient data*.
 - **Isolation:** the web server parses each upload in a separate process with a time limit, so a broken file cannot take it down.
@@ -146,7 +147,7 @@ Drop the file in `src/flightlens/checks/`; it is discovered automatically. Add s
 ## Development
 
 ```bash
-uv run pytest                                   # 240 tests (FLIGHTLENS_SLOW=1 adds a 100 MB test)
+uv run pytest                                   # 362 tests (FLIGHTLENS_SLOW=1 adds a 100 MB test)
 uv run ruff check . && uv run ruff format --check . && uv run mypy
 cd web && npm run dev                           # UI with hot reload; run `uv run flightlens serve` alongside
 uv run python scripts/fetch_px4_logs.py --count 20   # public test logs into testdata/real/

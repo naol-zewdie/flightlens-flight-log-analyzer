@@ -102,9 +102,13 @@ class Report:
             return Verdict.INSUFFICIENT_DATA
         v = verdict_for(self.findings)
         if v is Verdict.HEALTHY:
-            # Armed time if the log records arming, otherwise the whole log.
-            if self.flight.arming_known:
-                flown_s: float | None = sum(s.duration for s in self.flight.segments)
+            # Time in the air when the log tells it (a taxi or a ground run-up is
+            # armed but not a flight to call healthy), else armed time, else the log.
+            airborne = summarize(self.flight).airborne_s
+            if airborne is not None:
+                flown_s: float | None = airborne
+            elif self.flight.arming_known:
+                flown_s = sum(s.duration for s in self.flight.segments)
             else:
                 flown_s = self.flight.metadata.log_duration
             if flown_s is None or flown_s < MIN_FLIGHT_S:

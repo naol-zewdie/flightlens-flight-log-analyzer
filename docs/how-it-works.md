@@ -2,7 +2,7 @@
 
 ```mermaid
 flowchart LR
-    U[".ulg / .bin"] --> P["Parser<br/>(pyulog, own DataFlash reader)"]
+    U[".ulg / .bin / .tlog"] --> P["Parser<br/>(pyulog, own DataFlash and MAVLink readers)"]
     P --> M["Versioned mapping<br/>px4.yaml · ardupilot.yaml"]
     M --> F["Common flight model<br/>signals · events · parameters · armed segments · data quality"]
     F --> C["Checks (plugins)"]
@@ -101,6 +101,25 @@ detected), next to the change in each health metric and which findings are new,
 gone or present in both. Open it from two selected flights in the library, from
 "Compare with #n" in an aircraft's flight list, or "Compare…" on a flight, which
 picks the previous flight of the same aircraft.
+
+## Telemetry logs
+
+A `.tlog` is what a ground station (Mission Planner, QGroundControl,
+MAVProxy) received over the telemetry radio: MAVLink messages at their stream
+rates, usually 1-10 Hz, with whatever the radio lost. FlightLens reads it with
+its own MAVLink decoder (versions 1 and 2, signed frames, damaged bytes
+skipped), picks the vehicle among the senders (a tlog also holds the ground
+station's own heartbeat and peripherals), and maps the messages to the same
+signals as the onboard logs: attitude from `ATTITUDE`, position from
+`GLOBAL_POSITION_INT`, battery from `SYS_STATUS`, vibration from `VIBRATION`,
+estimator health from `EKF_STATUS_REPORT` (ArduPilot) or `ESTIMATOR_STATUS`
+(PX4), arming and flight modes from `HEARTBEAT`, parameters from the download
+the ground station made on connecting.
+
+The same checks then run, on less data. Packets lost on the link are reported
+from the gaps in MAVLink's sequence numbers. The noise spectrum and rate-loop
+tuning need the onboard log's high-rate data and report that they cannot run;
+on fixed wing, control-surface checks need the onboard `AETR` message.
 
 ## Rate-loop tuning
 

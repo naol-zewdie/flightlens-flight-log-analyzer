@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from functools import lru_cache
 from typing import Any
 
-MAPPING_FOR_FORMAT = {"dataflash": "ardupilot", "ulog": "px4"}
+MAPPING_FOR_FORMAT = {"dataflash": "ardupilot", "ulog": "px4", "tlog": "mavlink"}
 
 
 @lru_cache(maxsize=1)

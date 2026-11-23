@@ -189,7 +189,7 @@ export function Library() {
       {isEmpty ? (
         <button className="dropzone big" style={{ width: "100%" }} onClick={() => input.current?.click()}>
           <strong>Drop a flight log here</strong>
-          <span>PX4 .ulg and ArduPilot .bin logs are supported. Analysis runs on this machine; nothing is sent anywhere.</span>
+          <span>PX4 .ulg, ArduPilot .bin and MAVLink telemetry .tlog logs are supported. Analysis runs on this machine; nothing is sent anywhere.</span>
           <span className="faint" style={{ marginTop: 8 }}>or click to browse</span>
         </button>
       ) : (
@@ -335,7 +335,7 @@ export function Library() {
             </table>
           </div>
           <div className="hint" style={{ marginTop: 10 }}>
-            Drop .ulg or .bin files anywhere on this page to add them.
+            Drop .ulg, .bin or .tlog files anywhere on this page to add them.
           </div>
         </>
       )}

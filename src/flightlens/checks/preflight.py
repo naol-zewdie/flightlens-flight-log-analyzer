@@ -18,7 +18,10 @@ from collections import Counter
 from flightlens.checks.base import register
 from flightlens.model import CheckConfig, EventKind, Finding, Flight, Severity
 
-REASON = re.compile(r"^(?:\[[^\]]+\]\s*)?(?:Preflight Fail|PreArm|Arm):\s*(.+)$", re.IGNORECASE)
+REASON = re.compile(
+    r"^(?:\[[^\]]+\]\s*)?(?:Preflight Fail|PreArm|Arm|Arming disabled):\s*(.+)$",
+    re.IGNORECASE,
+)
 DENIED = re.compile(r"arming denied|arming refused|preflight check: failed|^arm: ", re.IGNORECASE)
 
 
@@ -26,7 +29,7 @@ DENIED = re.compile(r"arming denied|arming refused|preflight check: failed|^arm:
 class ArmingRefused:
     id = "preflight.arming"
     title = "Arming"
-    version = "1.0.0"
+    version = "1.1.0"
     required_signals: tuple[str, ...] = ()
     defaults = {"max_reasons": 5.0}
 

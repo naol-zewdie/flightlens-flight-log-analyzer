@@ -328,6 +328,8 @@ class Scenario:
     allow: list[str] = field(default_factory=list)
     crash_related: list[str] = field(default_factory=list)
     note: str = ""
+    suffix: str = ".bin"
+    """``.tlog`` for a telemetry log of the same flight."""
 
 
 def _win(check: str, severity: str, f: Fault, tol: float = 5.0) -> dict[str, Any]:
@@ -481,6 +483,26 @@ def scenarios() -> list[Scenario]:
         verdict="insufficient data",
     )
 
+    # the same faults seen only through the telemetry radio (3% packet loss)
+    def tlog(f: Fault | None, seed: int = 7) -> Callable[[Path], Path]:
+        return lambda p: _as_tlog(p, copter(p.with_suffix(".bin"), f, seed))
+
+    out.append(Scenario("tlog-copter-healthy", "healthy", tlog(None, 1), "healthy", suffix=".tlog"))
+    f = Fault("vibration", 60, 90, 75)
+    out.append(Scenario("tlog-copter-vibration", "vibration", tlog(f), "problem",
+                        expect=[_win("vibration.level", "problem", f)],
+                        suffix=".tlog"))  # fmt: skip
+    f = Fault("gps_loss", 70, 85)
+    out.append(Scenario("tlog-copter-gps-loss", "GPS", tlog(f), "problem",
+                        expect=[_win("gps.quality", "problem", f)], suffix=".tlog"))  # fmt: skip
+    f = Fault("radio_failsafe", 90, 96)
+    out.append(Scenario("tlog-copter-radio-failsafe", "failsafe", tlog(f), "problem",
+                        expect=[_win("events.failsafes", "problem", f, 2)],
+                        suffix=".tlog"))  # fmt: skip
+    f = Fault("battery_sag", 100, 115, 3.15)
+    out.append(Scenario("tlog-copter-battery-sag", "battery", tlog(f), "problem",
+                        expect=[_win("battery.sag", "problem", f)], suffix=".tlog"))  # fmt: skip
+
     def plane(**kw: Any) -> Callable[[Path], Path]:
         return lambda p: plane_log(p, **kw)
 
@@ -535,12 +557,22 @@ def scenarios() -> list[Scenario]:
     return out
 
 
+def _as_tlog(path: Path, onboard: Path) -> Path:
+    """Telemetry log of a generated flight; the onboard log it came from is removed."""
+    from flightlens import parsers
+    from flightlens.sim.telemetry import telemetry
+
+    flight = parsers.load(onboard)
+    onboard.unlink()
+    return telemetry(flight, path, loss=0.03, seed=1)
+
+
 def build(out_dir: Path) -> Path:
     """Write every scenario log and ``benchmark.yaml`` into ``out_dir``."""
     out_dir.mkdir(parents=True, exist_ok=True)
     logs: dict[str, Any] = {}
     for s in scenarios():
-        name = f"{s.name}.bin"
+        name = f"{s.name}{s.suffix}"
         s.make(out_dir / name)
         entry: dict[str, Any] = {"fault": s.fault, "exhaustive": True, "expect": s.expect}
         if s.verdict:

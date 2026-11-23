@@ -111,6 +111,40 @@ attitude symptoms suppressed because the aircraft was never in the air.
 Only one result changed: the known crash (`69531256`) is now also reported as a
 Crash, with the bank beyond its configured limit linked as a cause.
 
+## MAVLink `.tlog`: 71 real Mission Planner telemetry logs
+
+The owner's ground-station logs (not committed): 14 from a fixed wing
+(ArduPlane 4.5.7 and 4.6.2), 57 from a quadrotor (ArduCopter 4.6.3, 4.7.0,
+4.7.2, 4.7.3, and a Betaflight-style flight controller that reports a generic
+MAVLink autopilot), plus 5 onboard `.bin` logs from the same sessions.
+
+- **Decoding:** all 71 read, in 0.1-5.5 s (the largest, 100 MB, was mostly a
+  log download over the link: 924,355 of 945,765 packets are messages
+  FlightLens does not need). Radio loss from the sequence numbers: 0-8%.
+- **What they contain:** almost all are bench and setup sessions. The vehicle's
+  HEARTBEAT armed flag is never set in 68 of them, and the onboard logs of the
+  same day agree. FlightLens calls them *insufficient data* and, for 64 of
+  them, quotes why arming was refused (`PreArm: RC not found`, `Compass not
+  calibrated`, `EKF3 Roll/Pitch inconsistent`, `Battery 1 below minimum arming
+  voltage`, Betaflight's `Arming disabled: THROTTLE ANGLE`...).
+- **The three armed sessions:** a ground run-up with arming checks disabled
+  (throttle to 95%, no climb), recorded on two links at once: both tlogs say
+  *did not take off*; and a 21 s taxi that never climbed: *insufficient data*.
+
+Fixes made from these logs, all of them general (every format):
+
+| What the real data showed | Change |
+|---|---|
+| Prop-wash on the barometer moved the 2 Hz altitude by ±0.5 m per sample during a run-up, so min-to-max crossed the 1 m "it climbed" rule and the run-up counted as a flight (*healthy*). | The climb is measured after a running median (at least 5 samples and 0.5 s, edges padded). A real 1.1 m launch climb in the last second of an ArduPlane log still counts. |
+| A taxi was armed for 21 s with good checks, and was called *healthy*. | *Healthy* needs 10 s in the air, not 10 s armed, when the log tells when the aircraft flew. |
+| GPS findings came from time on the ground, unlike every other check. | GPS is judged in the air. |
+| Betaflight's arming blockers were not recognised. | `Arming disabled: <flags>` counts as an arming refusal. |
+
+On the earlier corpus these changes alter only what they should: GPS findings
+from the ground disappear on three ArduPlane logs, and one PX4 log that never
+left the ground (0.2 m) is *insufficient data* instead of *healthy*. The owner's
+labelled set (now 92 logs, including these) is fully correct.
+
 ## Gyro noise spectrum (`vibration.spectrum`)
 
 Calibrated on the 28 PX4 logs; thresholds are FlightLens defaults (a peak 15 dB

@@ -9,6 +9,14 @@ thresholds do.
 ## [0.2.0] - unreleased
 
 ### Added
+- **MAVLink telemetry logs (`.tlog`)** from ArduPilot and PX4, as Mission
+  Planner and QGroundControl record them: an own MAVLink v1/v2 decoder
+  (signed frames, CRC-checked, damaged bytes skipped; definitions tested
+  against pymavlink), vehicle selection among the senders, a versioned
+  signal mapping (`mavlink.yaml`), arming, modes, landed state, motors,
+  parameters and status texts; radio packet loss is reported. A telemetry
+  generator in the simulator puts 5 tlog scenarios in the benchmark (46 logs)
+  and one in the demo.
 - **Rate-loop tuning** (`control.tuning`): the roll and pitch rate controllers'
   step response, estimated from normal flying by regularised deconvolution
   (as PID-Analyzer and PX4 Flight Review do), with overshoot, falls-short,
@@ -87,6 +95,12 @@ thresholds do.
 - `flightlens serve` in a source checkout prefers `web/dist` over a bundled copy.
 
 ### Fixed
+- From 71 real Mission Planner telemetry logs: a ground run-up whose noisy
+  barometric altitude crossed 1 m counted as a flight (the climb is now
+  measured after a running median); a flight that never left the ground could
+  be called healthy (*healthy* now needs 10 s in the air); GPS findings came
+  from time on the ground (GPS is now judged in the air); Betaflight's
+  `Arming disabled:` reasons are recognised.
 - Damaged or hostile logs can no longer hang or crash the parsers (found by
   fuzzing): a PX4 log that sent the ULog reader (pyulog 1.3.0) into an endless
   loop is now refused with a clear error; ULog topics without a timestamp,

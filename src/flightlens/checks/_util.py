@@ -67,6 +67,13 @@ def climbed(flight: Flight) -> list[bool]:
     fooled (for example a simulator whose vehicle never lifts off), so when the
     altitude is known a segment must also climb at least ``MIN_CLIMB_M``.
     Without altitude data every segment is assumed to have flown.
+
+    The climb is measured on the altitude after a running median (at least 5
+    samples and 0.5 s), so a few noisy samples cannot make a flight: on a real
+    telemetry log of a ground run-up at 95% throttle, prop-wash on the
+    barometer made the 2 Hz altitude jump by ±0.5 m from sample to sample. A
+    real climb survives it, even one in the last second of a log (an ArduPlane
+    launch that crashed at 1.1 m).
     """
     alt = flight.signals.get("pos.rel_alt")
     if alt is None:
@@ -75,7 +82,17 @@ def climbed(flight: Flight) -> list[bool]:
     for seg in flight.segments:
         sel = (alt.t >= seg.start) & (alt.t <= seg.end) & np.isfinite(alt.values)
         vals = alt.values[sel]
-        out.append(bool(vals.size) and float(vals.max() - vals.min()) >= MIN_CLIMB_M)
+        if vals.size >= 3:
+            dt = float(np.median(np.diff(alt.t[sel])))
+            n = max(5, round(0.5 / dt) if dt > 0 else 5)
+            n = min(n, vals.size)
+            n -= 1 - n % 2  # odd, and never longer than the data
+            if n > 1:
+                # edges padded, so a climb in the last moments of a log still counts
+                padded = np.pad(vals, n // 2, mode="edge")
+                vals = np.median(np.lib.stride_tricks.sliding_window_view(padded, n), axis=1)
+        spread = float(vals.max() - vals.min()) if vals.size else 0.0
+        out.append(spread >= MIN_CLIMB_M)
     return out
 
 

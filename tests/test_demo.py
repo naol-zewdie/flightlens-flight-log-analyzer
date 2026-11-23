@@ -30,7 +30,15 @@ def test_seed_analyzes_and_is_idempotent(demo_dir: Path) -> None:
     assert verdicts == {"quad-07-gyro-noise.bin": "attention", "plane-04-crash.bin": "problem"}
     again = seed(demo_dir, only=PICK)  # same bytes: recognised, not duplicated
     assert len(again) == 2 and len(Store(demo_dir).list_flights()) == 2
-    assert all(name.endswith(".bin") for name in DEMO)
+    assert all(name.endswith((".bin", ".tlog")) for name in DEMO)
+
+
+def test_demo_includes_a_telemetry_log(tmp_path: Path) -> None:
+    seed(tmp_path, only=["quad-11-telemetry.tlog"])
+    (row,) = Store(tmp_path).list_flights()
+    assert row["log_format"] == "tlog" and row["status"] == "done"
+    assert row["verdict"] == "attention"  # the vibration it was generated with
+    assert row["serial"] == "0040003A3138511133383538"  # joins the demo quadcopter
 
 
 @pytest.fixture

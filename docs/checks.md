@@ -312,7 +312,7 @@ altitude never changed by 1 m: the aircraft did not take off.
 
 ### `flight.crash` · Crash or hard landing
 
-Version 1.0.0 · signals: `att.roll`, `att.pitch`
+Version 1.1.0 · signals: `att.roll`, `att.pitch`
 
 | Setting | Default |
 |---|---|
@@ -324,7 +324,7 @@ Version 1.0.0 · signals: `att.roll`, `att.pitch`
 
 ### `flight.takeoff` · Takeoff
 
-Version 1.0.0 · signals: `pos.rel_alt`
+Version 1.1.0 · signals: `pos.rel_alt`
 
 | Setting | Default |
 |---|---|
@@ -335,7 +335,9 @@ Version 1.0.0 · signals: `pos.rel_alt`
 
 Signals: ``gps.nsats``, ``gps.hdop``, ``gps.fix`` (fix type; 3 = 3D fix).
 
-Method: while armed, the worst condition held for at least 5 s.
+Method: in the air (like every check), the worst condition held for at least
+5 s. Poor reception while still on the ground is not judged: the aircraft may
+wait for a better fix before taking off.
 Attention: fewer than 8 satellites or HDOP above 1.4.
 Problem: fewer than 6 satellites, HDOP above 2.5, or loss of 3D fix for 2 s.
 
@@ -345,7 +347,7 @@ instead of raising a false alarm.
 
 ### `gps.quality` · GPS quality
 
-Version 1.0.0 · signals: `gps.nsats`, `gps.hdop`, `gps.fix`
+Version 1.1.0 · signals: `gps.nsats`, `gps.hdop`, `gps.fix`
 
 | Setting | Default |
 |---|---|
@@ -425,7 +427,7 @@ earlier refusals are summarised in an OK finding for context.
 
 ### `preflight.arming` · Arming
 
-Version 1.0.0 · signals: none (events)
+Version 1.1.0 · signals: none (events)
 
 | Setting | Default |
 |---|---|

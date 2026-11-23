@@ -1,8 +1,8 @@
 """Log format detection and loading.
 
 Each format has its own adapter module that returns a :class:`Flight`:
-``ulog`` (PX4 .ulg) and ``ardupilot`` (ArduPilot DataFlash .bin). MAVLink
-.tlog is not supported yet.
+``ulog`` (PX4 .ulg), ``ardupilot`` (ArduPilot DataFlash .bin) and ``tlog``
+(MAVLink telemetry .tlog, from either firmware).
 """
 
 from __future__ import annotations
@@ -75,7 +75,12 @@ def load(path: Path) -> Flight:
         except ardupilot.DataFlashParseError as exc:
             raise ParseError(str(exc)) from exc
     else:
-        raise ParseError(f"the {fmt.value} parser is not implemented yet")
+        from flightlens.parsers import tlog
+
+        try:
+            flight = tlog.parse(path)
+        except tlog.TlogParseError as exc:
+            raise ParseError(str(exc)) from exc
 
     flight.metadata = dataclasses.replace(flight.metadata, sha256=file_sha256(path))
     return flight

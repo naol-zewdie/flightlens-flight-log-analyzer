@@ -623,6 +623,37 @@ def default_web_dir() -> Path:
     return Path(__file__).parent / "web"
 
 
+WorkersOpt = Annotated[
+    int,
+    typer.Option(
+        min=1,
+        max=64,
+        envvar="FLIGHTLENS_WORKERS",
+        help="Logs analyzed at the same time (each uses one CPU core and its memory).",
+    ),
+]
+LogFormatOpt = Annotated[
+    str,
+    typer.Option(
+        envvar="FLIGHTLENS_LOG_FORMAT",
+        help="Server log format: text, or json (one object per line, for a log collector).",
+    ),
+]
+LogLevelOpt = Annotated[
+    str,
+    typer.Option(envvar="FLIGHTLENS_LOG_LEVEL", help="debug, info, warning or error."),
+]
+GraceOpt = Annotated[
+    float,
+    typer.Option(
+        "--shutdown-grace",
+        min=0,
+        envvar="FLIGHTLENS_SHUTDOWN_GRACE",
+        help="Seconds running analyses get to finish on shutdown; the rest resume on restart.",
+    ),
+]
+
+
 def _serve(
     host: str,
     port: int,
@@ -630,12 +661,23 @@ def _serve(
     web: Path | None,
     allow_host: list[str] | None,
     read_only: bool,
+    workers: int = 1,
+    log_format: str = "text",
+    log_level: str = "info",
+    shutdown_grace: float = 30.0,
 ) -> None:
     import os
 
     import uvicorn
 
     from flightlens.api import LOCAL_HOSTS, create_app
+    from flightlens.ops import setup_logging
+
+    try:
+        setup_logging(log_format.lower(), log_level.lower())
+    except ValueError as exc:
+        err_console.print(f"[red]error:[/] {exc}")
+        raise typer.Exit(EXIT_USAGE) from None
 
     hosts = [*LOCAL_HOSTS, *(allow_host or [])]
     hosts += [h.strip() for h in os.environ.get("FLIGHTLENS_ALLOWED_HOSTS", "").split(",")]
@@ -646,14 +688,28 @@ def _serve(
     web_dir = web or default_web_dir()
     if not (web_dir / "index.html").exists():
         err_console.print(f"[yellow]note:[/] no web UI at {web_dir}; serving the API only")
-    mode = " · read-only" if read_only else ""
-    console.print(f"FlightLens {__version__} · data in {data_dir.resolve()}{mode}")
-    console.print(f"Open http://{'localhost' if host in ('0.0.0.0', '127.0.0.1') else host}:{port}")
+    if log_format.lower() == "text":  # JSON mode: only JSON lines, for the log collector
+        mode = " · read-only" if read_only else ""
+        console.print(f"FlightLens {__version__} · data in {data_dir.resolve()}{mode}")
+        console.print(
+            f"Open http://{'localhost' if host in ('0.0.0.0', '127.0.0.1') else host}:{port}"
+        )
+    application = create_app(
+        data_dir,
+        web_dir,
+        allowed_hosts=hosts,
+        read_only=read_only,
+        workers=workers,
+        shutdown_grace_s=shutdown_grace,
+    )
     uvicorn.run(
-        create_app(data_dir, web_dir, allowed_hosts=hosts, read_only=read_only),
+        application,
         host=host,
         port=port,
+        log_config=None,  # setup_logging owns the handlers
         log_level="warning",
+        access_log=False,
+        timeout_graceful_shutdown=int(shutdown_grace) or None,
     )
 
 
@@ -667,12 +723,27 @@ def serve_cmd(
     web: WebOpt = None,
     allow_host: AllowHostOpt = None,
     read_only: ReadOnlyOpt = False,
+    workers: WorkersOpt = 1,
+    log_format: LogFormatOpt = "text",
+    log_level: LogLevelOpt = "info",
+    shutdown_grace: GraceOpt = 30.0,
 ) -> None:
     """Start the web app and API."""
     import os
 
     data_dir = data or Path(os.environ.get("FLIGHTLENS_DATA", "data"))
-    _serve(host, port, data_dir, web, allow_host, read_only)
+    _serve(
+        host,
+        port,
+        data_dir,
+        web,
+        allow_host,
+        read_only,
+        workers=workers,
+        log_format=log_format,
+        log_level=log_level,
+        shutdown_grace=shutdown_grace,
+    )
 
 
 @app.command("demo")

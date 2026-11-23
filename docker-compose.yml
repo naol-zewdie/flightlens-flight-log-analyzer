@@ -8,9 +8,13 @@ services:
       - "127.0.0.1:8000:8000"
     # environment:
     #   FLIGHTLENS_ALLOWED_HOSTS: "192.168.1.20"
+    #   FLIGHTLENS_WORKERS: "2"          # logs analyzed at once
+    #   FLIGHTLENS_LOG_FORMAT: "text"    # default in the image: json
     volumes:
       - flightlens-data:/data
     restart: unless-stopped
+    # running analyses get 30 s to finish (--shutdown-grace); leave a margin
+    stop_grace_period: 45s
 
 volumes:
   flightlens-data:

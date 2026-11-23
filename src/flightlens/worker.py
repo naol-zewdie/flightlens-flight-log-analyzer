@@ -9,21 +9,31 @@ or interrupted job never leaves half-written results.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import multiprocessing as mp
 import queue
 import shutil
+import signal
 import threading
+import time
 import traceback
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from flightlens.ops import JOB_BUCKETS, Metrics
 from flightlens.profiles import Profile
 from flightlens.store import Store, write_signals
 
 DEFAULT_TIMEOUT_S = 300
+DEFAULT_WORKERS = 1
+DEFAULT_MAX_QUEUE = 500
+MAX_ATTEMPTS = 3
+"""A job interrupted this many times by a server stop is failed, not resumed again."""
+
+log = logging.getLogger("flightlens.jobs")
 
 
 @dataclass(frozen=True)
@@ -153,6 +163,11 @@ def _clean(obj: Any) -> Any:
 
 
 def _child(log_path: str, out_dir: str, profiles: ProfileContext, conn: Any) -> None:
+    # Ctrl+C in a terminal reaches every process in its group; the analysis must
+    # be stopped by the server (which puts the job back in the queue), not by that.
+    for name in ("SIGINT", "SIGBREAK"):
+        if hasattr(signal, name):
+            signal.signal(getattr(signal, name), signal.SIG_IGN)
     try:
         conn.send(("ok", process_log(log_path, out_dir, profiles)))
     except Exception as exc:
@@ -167,39 +182,158 @@ def _child(log_path: str, out_dir: str, profiles: ProfileContext, conn: Any) -> 
 
 
 class JobRunner:
-    """Processes queued jobs one at a time on a background thread."""
+    """Runs queued analysis jobs on background threads, each log in its own process.
 
-    def __init__(self, store: Store, timeout_s: float = DEFAULT_TIMEOUT_S) -> None:
+    * Up to ``workers`` jobs run at once; two jobs for the same flight never do.
+    * ``start()`` first picks up jobs that a stopped server left unfinished.
+    * ``stop(grace_s)`` takes no new jobs, lets running ones finish for up to
+      ``grace_s`` seconds, then stops them and puts them back in the queue.
+      Queued jobs stay queued. The next ``start()`` runs them all.
+    """
+
+    def __init__(
+        self,
+        store: Store,
+        timeout_s: float = DEFAULT_TIMEOUT_S,
+        workers: int = DEFAULT_WORKERS,
+        max_queue: int = DEFAULT_MAX_QUEUE,
+        metrics: Metrics | None = None,
+    ) -> None:
+        if workers < 1:
+            raise ValueError("workers must be at least 1")
         self.store = store
         self.timeout_s = timeout_s
-        self._queue: queue.Queue[tuple[str, str]] = queue.Queue()
+        self.workers = workers
+        self.max_queue = max_queue
+        self.metrics = metrics or Metrics()
+        self._queue: queue.Queue[tuple[str, str] | None] = queue.Queue()
         self._ctx = mp.get_context("spawn")
-        self._thread = threading.Thread(target=self._loop, name="flightlens-jobs", daemon=True)
-        self._thread.start()
+        self._target: Any = _child  # what the analysis process runs (tests swap it)
+        self._lock = threading.Lock()
+        self._busy: dict[str, str] = {}  # flight id -> the job running for it
+        self._deferred: dict[str, list[str]] = {}  # flight id -> jobs waiting for it
+        self._procs: dict[str, Any] = {}  # job id -> its analysis process
+        self._interrupted: set[str] = set()
+        self._stopping = threading.Event()
+        self._threads: list[threading.Thread] = []
+
+    # --- lifecycle -------------------------------------------------------------------
+
+    def start(self) -> int:
+        """Start the workers; returns how many unfinished jobs were resumed."""
+        resumed, given_up = self.store.resume_jobs(MAX_ATTEMPTS)
+        for item in resumed:
+            self._queue.put(item)
+        if resumed or given_up:
+            log.info(
+                "resuming unfinished jobs", extra={"resumed": len(resumed), "given_up": given_up}
+            )
+        self._threads = [
+            threading.Thread(target=self._loop, name=f"flightlens-jobs-{i}", daemon=True)
+            for i in range(self.workers)
+        ]
+        for t in self._threads:
+            t.start()
+        return len(resumed)
+
+    def stop(self, grace_s: float = 30) -> dict[str, int]:
+        """Stop taking jobs, wait up to ``grace_s`` for running ones, then interrupt them."""
+        self._stopping.set()
+        for _ in self._threads:
+            self._queue.put(None)
+        deadline = time.monotonic() + grace_s
+        for t in self._threads:
+            t.join(max(0.0, deadline - time.monotonic()))
+        with self._lock:
+            still = list(self._procs.items())
+            self._interrupted.update(job_id for job_id, _ in still)
+        for _, proc in still:
+            proc.kill()
+        for t in self._threads:
+            t.join(10)
+        left = 0
+        while True:
+            try:
+                left += self._queue.get_nowait() is not None
+            except queue.Empty:
+                break
+        with self._lock:
+            left += sum(len(v) for v in self._deferred.values())
+        return {"interrupted": len(still), "left_queued": left}
+
+    # --- state -----------------------------------------------------------------------
 
     def submit(self, job_id: str, flight_id: str) -> None:
         self._queue.put((job_id, flight_id))
 
     def pending(self) -> int:
-        return self._queue.qsize()
+        """Jobs waiting to run."""
+        with self._lock:
+            deferred = sum(len(v) for v in self._deferred.values())
+        return self._queue.qsize() + deferred
+
+    def running(self) -> int:
+        with self._lock:
+            return len(self._busy)
+
+    def full(self) -> bool:
+        return self.pending() >= self.max_queue
+
+    def alive(self) -> bool:
+        return (
+            not self._stopping.is_set()
+            and bool(self._threads)
+            and all(t.is_alive() for t in self._threads)
+        )
+
+    # --- work ------------------------------------------------------------------------
 
     def _loop(self) -> None:
         while True:
-            job_id, flight_id = self._queue.get()
+            item = self._queue.get()
+            if item is None:
+                return
+            if self._stopping.is_set():
+                self._queue.put(item)  # stays queued in the database; resumed at the next start
+                return
+            job_id, flight_id = item
+            with self._lock:
+                if flight_id in self._busy:  # never two analyses of one flight at once
+                    self._deferred.setdefault(flight_id, []).append(job_id)
+                    continue
+                self._busy[flight_id] = job_id
             try:
                 self._run(job_id, flight_id)
-            except Exception as exc:  # never let the loop die
+            except Exception as exc:  # never let a worker die
+                log.exception("job runner error", extra={"job": job_id, "flight": flight_id})
                 self.store.set_job(job_id, "failed", f"internal error: {exc}")
+                self.metrics.inc("flightlens_jobs_total", {"outcome": "failed"})
+            finally:
+                with self._lock:
+                    del self._busy[flight_id]
+                    waiting = self._deferred.get(flight_id)
+                    following = waiting.pop(0) if waiting else None
+                    if waiting is not None and not waiting:
+                        del self._deferred[flight_id]
+                if following is not None:
+                    self._queue.put((following, flight_id))
 
     def _run(self, job_id: str, flight_id: str) -> None:
+        ids = {"job": job_id, "flight": flight_id}
+        if self._stopping.is_set():
+            return  # taken just as the server began to stop: stays queued, resumes next start
         original = self.store.original_path(flight_id)
         if original is None:
             self.store.set_job(job_id, "failed", "The original log file is missing")
+            self.metrics.inc("flightlens_jobs_total", {"outcome": "failed"})
+            log.warning("job failed: original missing", extra=ids)
             return
         self.store.set_job(job_id, "processing")
+        log.info("job started", extra=ids)
+        started = time.monotonic()
         parent, child = self._ctx.Pipe(duplex=False)
         proc = self._ctx.Process(
-            target=_child,
+            target=self._target,
             args=(
                 str(original),
                 str(self.store.flight_dir(flight_id)),
@@ -210,27 +344,64 @@ class JobRunner:
         )
         proc.start()
         child.close()
-        if not parent.poll(self.timeout_s):
-            proc.kill()
-            proc.join()
-            self.store.set_job(
-                job_id,
-                "failed",
-                f"Analysis took longer than {self.timeout_s:.0f} s and was stopped",
-            )
-            return
+        with self._lock:
+            self._procs[job_id] = proc
         try:
-            status, payload = parent.recv()
-        except EOFError:
-            status, payload = "crash", "The analysis process exited unexpectedly"
-        proc.join(timeout=10)
+            status, payload = self._wait(proc, parent)
+            proc.join(timeout=10)
+        finally:
+            parent.close()
+            with self._lock:
+                self._procs.pop(job_id, None)
+                # also a child that died during shutdown (e.g. from the terminal's Ctrl+C)
+                interrupted = job_id in self._interrupted or self._stopping.is_set()
+                self._interrupted.discard(job_id)
+        seconds = round(time.monotonic() - started, 3)
 
         if status == "ok":
             self.store.record_result(flight_id, payload)
             self.store.set_job(job_id, "done")
+            outcome = "done"
+            log.info(
+                "job done",
+                extra={**ids, "seconds": seconds, "verdict": payload.get("verdict")},
+            )
+        elif interrupted:
+            self.store.set_job(job_id, "queued")  # resumed at the next start
+            outcome = "interrupted"
+            log.warning("job interrupted by shutdown; will resume", extra={**ids})
+        elif status == "timeout":
+            message = f"Analysis took longer than {self.timeout_s:.0f} s and was stopped"
+            self.store.set_job(job_id, "failed", message)
+            outcome = "timeout"
+            log.warning("job timed out", extra={**ids, "seconds": seconds})
         elif status == "rejected":
             self.store.set_job(job_id, "failed", f"Cannot read this log: {payload}")
+            outcome = "rejected"
+            log.info("job rejected: unreadable log", extra={**ids, "reason": str(payload)[:200]})
         else:
-            self.store.set_job(
-                job_id, "failed", f"Analysis error: {(str(payload).splitlines() or ['unknown'])[0]}"
-            )
+            first = (str(payload).splitlines() or ["unknown"])[0]
+            self.store.set_job(job_id, "failed", f"Analysis error: {first}")
+            outcome = "failed"
+            log.warning("job failed", extra={**ids, "error": first[:200]})
+        self.metrics.inc("flightlens_jobs_total", {"outcome": outcome})
+        if outcome != "interrupted":
+            self.metrics.observe("flightlens_job_duration_seconds", seconds, buckets=JOB_BUCKETS)
+
+    def _wait(self, proc: Any, parent: Any) -> tuple[str, Any]:
+        """The child's answer; checks in short slices so a killed child is noticed at once."""
+        deadline = time.monotonic() + self.timeout_s
+        while True:
+            if parent.poll(0.2):
+                try:
+                    result: tuple[str, Any] = parent.recv()
+                except EOFError:
+                    return "crash", "The analysis process exited unexpectedly"
+                return result
+            if not proc.is_alive():
+                if parent.poll(0):
+                    continue  # it answered just before exiting
+                return "crash", "The analysis process exited unexpectedly"
+            if time.monotonic() > deadline:
+                proc.kill()
+                return "timeout", None

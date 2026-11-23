@@ -126,12 +126,18 @@ def _v4_reviews_and_analysis_versions(db: sqlite3.Connection, data: Path) -> Non
             )
 
 
+def _v5_job_attempts(db: sqlite3.Connection, data: Path) -> None:
+    # how often a job was started: a job that keeps stopping the server is given up
+    _add_column(db, "jobs", "attempts", "INTEGER NOT NULL DEFAULT 0")
+
+
 Migration = Callable[[sqlite3.Connection, Path], None]
 MIGRATIONS: tuple[tuple[int, str, Migration], ...] = (
     (1, "flights and analysis jobs", _v1_flights_and_jobs),
     (2, "aircraft identity and trend metrics", _v2_aircraft_identity_and_metrics),
     (3, "threshold profiles", _v3_threshold_profiles),
     (4, "engineer reviews and analysis versions", _v4_reviews_and_analysis_versions),
+    (5, "job attempts, so interrupted jobs resume", _v5_job_attempts),
 )
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 

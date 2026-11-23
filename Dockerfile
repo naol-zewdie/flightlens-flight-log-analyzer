@@ -31,6 +31,7 @@ RUN useradd --system --uid 10001 --no-create-home flightlens \
 USER flightlens
 ENV FLIGHTLENS_DATA=/data \
     FLIGHTLENS_WEB=/app/web/dist \
+    FLIGHTLENS_LOG_FORMAT=json \
     PATH="/app/.venv/bin:$PATH"
 VOLUME ["/data"]
 EXPOSE 8000

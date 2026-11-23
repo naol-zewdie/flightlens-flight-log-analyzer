@@ -7,10 +7,15 @@ queued; parsing happens in an isolated child process (see ``worker.py``).
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import logging
+import shutil
+import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote, urlsplit
@@ -26,12 +31,18 @@ from flightlens.checks import all_checks
 from flightlens.htmlreport import render_html
 from flightlens.lttb import lttb, with_gaps
 from flightlens.metrics import METRICS
+from flightlens.ops import Labels, Metrics, new_metrics, request_id
 from flightlens.profiles import NAME_MAX, ProfileError, learn_profile, parse_profile
 from flightlens.provenance import stale_reasons
 from flightlens.reviews import NOTE_MAX, REVIEWABLE, STATUSES, finding_key, manifest_yaml, orphaned
 from flightlens.reviews import with_keys as findings_with_reviews
 from flightlens.store import Store, safe_suffix
-from flightlens.worker import DEFAULT_TIMEOUT_S, JobRunner
+from flightlens.worker import (
+    DEFAULT_MAX_QUEUE,
+    DEFAULT_TIMEOUT_S,
+    DEFAULT_WORKERS,
+    JobRunner,
+)
 
 MAX_UPLOAD_BYTES = 1024**3  # 1 GB, from the spec
 MULTIPART_OVERHEAD = 1 << 20
@@ -39,6 +50,13 @@ LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
 CHUNK = 1 << 20
 MAX_POINTS = 20_000
 TRACK_POINTS = 3_000
+MIN_FREE_BYTES = 512 * 1024**2
+"""Uploads are refused when the data disk has less free space than this."""
+SHUTDOWN_GRACE_S = 30.0
+QUIET_PATHS = ("/api/health", "/metrics")
+
+log = logging.getLogger("flightlens.server")
+http_log = logging.getLogger("flightlens.http")
 
 
 class FlightPatch(BaseModel):
@@ -73,6 +91,10 @@ def create_app(
     timeout_s: float = DEFAULT_TIMEOUT_S,
     allowed_hosts: Sequence[str] = LOCAL_HOSTS,
     read_only: bool = False,
+    workers: int = DEFAULT_WORKERS,
+    max_queue: int = DEFAULT_MAX_QUEUE,
+    shutdown_grace_s: float = SHUTDOWN_GRACE_S,
+    min_free_bytes: int = MIN_FREE_BYTES,
 ) -> FastAPI:
     """Build the app.
 
@@ -80,20 +102,57 @@ def create_app(
     any). Anything else is refused, which blocks DNS-rebinding attacks from web
     pages open in the user's browser. ``read_only`` refuses every change
     (uploads, edits, deletes, re-analysis), for a public demo.
+
+    ``workers`` logs are analyzed at once; at most ``max_queue`` may wait. On
+    shutdown, running analyses get ``shutdown_grace_s`` seconds to finish;
+    anything unfinished is resumed at the next start.
     """
     store = Store(data_dir)
-    runner = JobRunner(store, timeout_s=timeout_s)
+    if store.schema_from != store.schema_version:
+        log.info(
+            "library upgraded",
+            extra={"schema_from": store.schema_from, "schema_to": store.schema_version},
+        )
+    metrics = new_metrics()
+    runner = JobRunner(
+        store, timeout_s=timeout_s, workers=workers, max_queue=max_queue, metrics=metrics
+    )
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        resumed = runner.start()
+        log.info(
+            "server started",
+            extra={
+                "version": __version__,
+                "data": str(store.root.resolve()),
+                "workers": workers,
+                "resumed_jobs": resumed,
+                "read_only": read_only,
+            },
+        )
+        yield
+        log.info("shutting down", extra={"running_jobs": runner.running()})
+        result = await asyncio.to_thread(runner.stop, shutdown_grace_s)
+        log.info("server stopped", extra=result)
+
     app = FastAPI(
         title="FlightLens",
         version=__version__,
         docs_url="/api/docs",
         openapi_url="/api/openapi.json",
+        lifespan=lifespan,
     )
     app.state.store = store
     app.state.runner = runner
+    app.state.metrics = metrics
     app.add_middleware(
         RequestGuard, allowed_hosts=tuple(h.lower() for h in allowed_hosts), read_only=read_only
     )
+    app.add_middleware(ObservedRequests, metrics=metrics)  # outermost: sees refusals too
+
+    def disk_free() -> int:
+        return shutil.disk_usage(store.root).free
 
     def row_stale(row: dict[str, Any]) -> list[str]:
         """Why this flight's analysis is out of date (empty when current or not analyzed)."""
@@ -118,18 +177,86 @@ def create_app(
     # --- health & upload ---------------------------------------------------------
 
     @app.get("/api/health")
-    def health() -> dict[str, Any]:
-        return {
-            "status": "ok",
-            "version": __version__,
-            "queued_jobs": runner.pending(),
-            "read_only": read_only,
+    def health(response: Response) -> dict[str, Any]:
+        """Liveness and readiness: 503 when the database or the job workers are down."""
+        free = disk_free()
+        checks = {
+            "database": store.ping(),
+            "jobs": runner.alive(),
+            "disk": free >= min_free_bytes,
         }
+        if not (checks["database"] and checks["jobs"]):
+            status = "down"
+            response.status_code = 503
+        else:
+            status = "ok" if checks["disk"] else "degraded"  # reads work; uploads are refused
+        return {
+            "status": status,
+            "version": __version__,
+            "read_only": read_only,
+            "checks": checks,
+            "queued_jobs": runner.pending(),
+            "running_jobs": runner.running(),
+            "workers": workers,
+            "disk_free_bytes": free,
+            "uptime_s": round(time.time() - metrics.started, 1),
+        }
+
+    @app.get("/metrics", include_in_schema=False)
+    def metrics_endpoint() -> Response:
+        """Prometheus metrics."""
+        counts = store.counts()
+
+        def series(values: dict[str, int], label: str) -> list[tuple[Labels, float]]:
+            return [(((label, k),), v) for k, v in sorted(values.items())]
+
+        gauges: list[tuple[str, str, list[tuple[Labels, float]]]] = [
+            ("flightlens_info", "FlightLens version.", [((("version", __version__),), 1)]),
+            ("flightlens_start_time_seconds", "When the server started.", [((), metrics.started)]),
+            ("flightlens_schema_version", "Library database schema.", [((), store.schema_version)]),
+            ("flightlens_flights", "Flights by status.", series(counts["status"], "status")),
+            (
+                "flightlens_flights_by_verdict",
+                "Analyzed flights by verdict.",
+                series(counts["verdict"], "verdict"),
+            ),
+            (
+                "flightlens_original_bytes",
+                "Size of all original logs.",
+                [((), counts["original_bytes"])],
+            ),
+            ("flightlens_jobs_queued", "Jobs waiting to run.", [((), runner.pending())]),
+            ("flightlens_jobs_running", "Jobs running now.", [((), runner.running())]),
+            ("flightlens_workers", "Jobs that can run at once.", [((), workers)]),
+            ("flightlens_disk_free_bytes", "Free space on the data disk.", [((), disk_free())]),
+        ]
+        return Response(
+            metrics.render(gauges), media_type="text/plain; version=0.0.4; charset=utf-8"
+        )
 
     # A plain ``def``: FastAPI runs it in a worker thread, so hashing and
     # copying a large file does not block other requests.
     @app.post("/api/logs", status_code=202)
     def upload(file: Annotated[UploadFile, File()]) -> dict[str, Any]:
+        try:
+            result = receive_upload(file)
+        except HTTPException as exc:
+            metrics.inc("flightlens_uploads_total", {"result": f"refused_{exc.status_code}"})
+            raise
+        metrics.inc(
+            "flightlens_uploads_total", {"result": "duplicate" if result["duplicate"] else "queued"}
+        )
+        return result
+
+    def receive_upload(file: UploadFile) -> dict[str, Any]:
+        if runner.full():
+            raise HTTPException(
+                503,
+                f"The analysis queue is full ({runner.pending()} logs waiting); try again shortly",
+                headers={"Retry-After": "30"},
+            )
+        if disk_free() < min_free_bytes:
+            raise HTTPException(507, "The server is low on disk space; uploads are paused")
         filename = Path(file.filename or "upload").name[:200]
         tmp = store.root / "uploads" / f"{uuid.uuid4().hex}.part"
         digest = hashlib.sha256()
@@ -620,6 +747,66 @@ def _defaults_for(profile: Any) -> dict[str, dict[str, float]]:
         cid: {k: by_id[cid].defaults[k] for k in values if cid in by_id}
         for cid, values in profile.overrides.items()
     }
+
+
+class ObservedRequests:
+    """Times, counts and logs every request, and tags it with an X-Request-ID.
+
+    Metrics use the route *template* (``/api/flights/{flight_id}``), never the
+    raw path, so the number of series stays small.
+    """
+
+    def __init__(self, app: Any, metrics: Metrics) -> None:
+        self.app = app
+        self.metrics = metrics
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        incoming = next((v for k, v in scope["headers"] if k == b"x-request-id"), None)
+        rid = request_id(incoming.decode("latin-1") if incoming else None)
+        status = 500
+        started = time.perf_counter()
+
+        async def tagged(message: Any) -> None:
+            nonlocal status
+            if message["type"] == "http.response.start":
+                status = message["status"]
+                message["headers"] = [*message.get("headers", []), (b"x-request-id", rid.encode())]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, tagged)
+        finally:
+            seconds = time.perf_counter() - started
+            route = scope.get("route")
+            template = getattr(route, "path", None) or "unmatched"
+            labels = {"method": scope["method"], "route": template, "status": str(status)}
+            self.metrics.inc("flightlens_http_requests_total", labels)
+            self.metrics.observe(
+                "flightlens_http_request_duration_seconds", seconds, {"route": template}
+            )
+            path = scope["path"]
+            level = (
+                logging.ERROR
+                if status >= 500
+                else logging.DEBUG
+                if path in QUIET_PATHS
+                else logging.INFO
+            )
+            http_log.log(
+                level,
+                "request",
+                extra={
+                    "method": scope["method"],
+                    "path": path,
+                    "route": template,
+                    "status": status,
+                    "ms": round(seconds * 1000, 1),
+                    "request_id": rid,
+                },
+            )
 
 
 class RequestGuard:

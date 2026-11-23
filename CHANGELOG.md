@@ -9,6 +9,14 @@ thresholds do.
 ## [0.2.0] - unreleased
 
 ### Added
+- **Operations**: `/api/health` reports the database, job workers and disk
+  (503 when down); Prometheus metrics at `/metrics`; request and analysis logs,
+  as text or JSON (`--log-format json`), with an `X-Request-ID` on every
+  response; `--workers N` parallel analysis; uploads refused with 503 when the
+  queue is full and 507 when the disk is nearly full; graceful shutdown that
+  lets running analyses finish and resumes unfinished ones at the next start
+  (database schema 5: job attempts). Opening a library from the CLI no longer
+  fails the jobs of a server that is running on it.
 - **Data safety**: the database schema is versioned (`PRAGMA user_version`)
   with ordered, transactional migrations; an upgrade keeps a copy of the old
   database and a newer library is refused. `flightlens backup` (consistent

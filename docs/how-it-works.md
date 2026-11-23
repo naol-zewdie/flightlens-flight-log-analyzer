@@ -218,3 +218,21 @@ docker compose cp flightlens:/data/backup.zip .
 **Retention.** Nothing is deleted automatically. `flightlens prune --older-than
 365` lists the flights older than a year (by the flight's date) and keeps those
 an engineer reviewed; `--yes` deletes them.
+
+## Running as a service
+
+`flightlens serve` (and the Docker image) is meant to run unattended.
+
+| | |
+|---|---|
+| `GET /api/health` | `ok`, `degraded` (low disk: uploads paused, reads work) or `down` with status 503 (database or job workers not working). The Docker `HEALTHCHECK` uses it. |
+| `GET /metrics` | Prometheus text: requests by route and status, request time, uploads by result, analyses by outcome and duration, queue length, flights by status and verdict, free disk space. Routes are templates (`/api/flights/{flight_id}`), never raw paths. |
+| Logs | One line per request, analysis started/done/failed with its time and verdict. `--log-format json` writes one JSON object per line for a log collector (the Docker image's default). Every response carries an `X-Request-ID` (yours, if you send one), which is also in the log line. |
+| `--workers N` | Analyzes N logs at once (default 1). Two analyses of the same flight never run together. |
+| Limits | At most 500 logs wait in the queue; beyond that uploads get 503 with `Retry-After`. Below 512 MB of free disk space uploads get 507. |
+| Shutdown | On Ctrl+C or `docker stop` the server stops taking work, gives running analyses `--shutdown-grace` seconds (default 30), then stops them. Unfinished analyses go back to the queue and resume at the next start; one that was interrupted 3 times is marked failed instead, so a log cannot block the server forever. |
+
+Settings can also come from the environment: `FLIGHTLENS_WORKERS`,
+`FLIGHTLENS_LOG_FORMAT`, `FLIGHTLENS_LOG_LEVEL`, `FLIGHTLENS_SHUTDOWN_GRACE`.
+A Prometheus server in another container reaches FlightLens by a host name
+that must be allowed: add it to `FLIGHTLENS_ALLOWED_HOSTS`.

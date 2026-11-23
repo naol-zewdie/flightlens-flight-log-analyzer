@@ -69,16 +69,78 @@ class Store:
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA foreign_keys = ON")
         self.schema_from, self.schema_version = migrate(self._db, self.root / "flightlens.db")
-        # Jobs interrupted by a restart are failed, never left "processing".
-        self._db.execute(
-            "UPDATE jobs SET status='failed', error='Interrupted by a restart; upload again' "
-            "WHERE status IN ('queued','processing')"
-        )
-        self._db.execute(
-            "UPDATE flights SET status='failed', error='Interrupted by a restart; upload again' "
-            "WHERE status IN ('queued','processing')"
-        )
-        self._db.commit()
+        # Jobs left queued or processing are picked up by the job runner when the
+        # server starts (``resume_jobs``); opening the library elsewhere (the CLI,
+        # a backup) must not touch jobs a running server is working on.
+
+    # --- health --------------------------------------------------------------
+
+    def ping(self) -> bool:
+        try:
+            with self._lock:
+                self._db.execute("SELECT 1").fetchone()
+        except sqlite3.Error:
+            return False
+        return True
+
+    def counts(self) -> dict[str, Any]:
+        """Flights by status and by verdict, and the size of the original logs."""
+        with self._lock:
+            status = self._db.execute(
+                "SELECT status, count(*) FROM flights GROUP BY status"
+            ).fetchall()
+            verdict = self._db.execute(
+                "SELECT verdict, count(*) FROM flights WHERE verdict IS NOT NULL GROUP BY verdict"
+            ).fetchall()
+            size = self._db.execute("SELECT coalesce(sum(size_bytes), 0) FROM flights").fetchone()
+        return {
+            "status": {r[0]: r[1] for r in status},
+            "verdict": {r[0]: r[1] for r in verdict},
+            "original_bytes": int(size[0]),
+        }
+
+    # --- jobs after a restart ------------------------------------------------
+
+    def resume_jobs(self, max_attempts: int) -> tuple[list[tuple[str, str]], int]:
+        """Jobs a stopped server left unfinished: (jobs to run again, jobs given up).
+
+        A job that was already started ``max_attempts`` times is failed instead:
+        a log that stops the server every time it is analyzed must not stop it forever.
+        """
+        resume: list[tuple[str, str]] = []
+        given_up = 0
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT j.id, j.flight_id, j.attempts FROM jobs j JOIN flights f "
+                "ON f.id = j.flight_id WHERE j.status IN ('queued','processing') "
+                "ORDER BY j.created_at"
+            ).fetchall()
+            for job_id, flight_id, attempts in rows:
+                if attempts >= max_attempts:
+                    error = (
+                        f"Analysis was interrupted {attempts} times by a server stop; "
+                        "re-analyze to try again"
+                    )
+                    status = "failed"
+                    given_up += 1
+                else:
+                    error, status = None, "queued"
+                    resume.append((job_id, flight_id))
+                self._db.execute(
+                    "UPDATE jobs SET status=?, error=?, updated_at=? WHERE id=?",
+                    (status, error, time.time(), job_id),
+                )
+                self._db.execute(
+                    "UPDATE flights SET status=?, error=? WHERE id=?", (status, error, flight_id)
+                )
+            # jobs whose flight was deleted
+            self._db.execute(
+                "UPDATE jobs SET status='failed', error='The flight was deleted' "
+                "WHERE status IN ('queued','processing') "
+                "AND flight_id NOT IN (SELECT id FROM flights)"
+            )
+            self._db.commit()
+        return resume, given_up
 
     # --- paths ---------------------------------------------------------------
 
@@ -133,7 +195,9 @@ class Store:
             raise
         with self._lock:
             self._db.execute(
-                "INSERT INTO jobs VALUES (?,?, 'queued', NULL, ?, ?)", (job_id, flight_id, now, now)
+                "INSERT INTO jobs (id, flight_id, status, error, created_at, updated_at) "
+                "VALUES (?,?, 'queued', NULL, ?, ?)",
+                (job_id, flight_id, now, now),
             )
             self._db.commit()
         return flight_id, job_id
@@ -146,7 +210,9 @@ class Store:
                 "UPDATE flights SET status='queued', error=NULL WHERE id=?", (flight_id,)
             )
             self._db.execute(
-                "INSERT INTO jobs VALUES (?,?, 'queued', NULL, ?, ?)", (job_id, flight_id, now, now)
+                "INSERT INTO jobs (id, flight_id, status, error, created_at, updated_at) "
+                "VALUES (?,?, 'queued', NULL, ?, ?)",
+                (job_id, flight_id, now, now),
             )
             self._db.commit()
         return job_id
@@ -154,8 +220,9 @@ class Store:
     def set_job(self, job_id: str, status: str, error: str | None = None) -> None:
         with self._lock:
             self._db.execute(
-                "UPDATE jobs SET status=?, error=?, updated_at=? WHERE id=?",
-                (status, error, time.time(), job_id),
+                "UPDATE jobs SET status=?, error=?, updated_at=?, "
+                "attempts = attempts + (? = 'processing') WHERE id=?",
+                (status, error, time.time(), status, job_id),
             )
             row = self._db.execute("SELECT flight_id FROM jobs WHERE id=?", (job_id,)).fetchone()
             if row:

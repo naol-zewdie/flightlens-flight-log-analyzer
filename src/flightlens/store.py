@@ -2,7 +2,8 @@
 
 Layout under the data directory::
 
-    flightlens.db                 flights and jobs index
+    flightlens.db                 index: flights, jobs, aircraft, profiles, reviews
+                                  (schema versioned, see flightlens.schema)
     flights/<id>/original.<ext>   the uploaded log, never modified
     flights/<id>/analysis/report.json         report, summary, events, signal catalogue
     flights/<id>/analysis/signals/*.parquet   one file per signal (t, v)
@@ -28,65 +29,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from flightlens.profiles import Profile
-from flightlens.provenance import stale_reasons, versions_of
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS flights (
-    id            TEXT PRIMARY KEY,
-    sha256        TEXT UNIQUE NOT NULL,
-    filename      TEXT NOT NULL,
-    log_format    TEXT,
-    size_bytes    INTEGER,
-    uploaded_at   REAL NOT NULL,
-    status        TEXT NOT NULL,      -- queued | processing | done | failed
-    error         TEXT,
-    firmware      TEXT,
-    vehicle_type  TEXT,
-    hardware      TEXT,
-    start_time    TEXT,
-    duration_s    REAL,
-    verdict       TEXT,
-    score         INTEGER,
-    n_problem     INTEGER,
-    n_attention   INTEGER,
-    aircraft      TEXT,
-    serial        TEXT,
-    metrics       TEXT              -- JSON, flightlens.metrics
-);
-CREATE TABLE IF NOT EXISTS jobs (
-    id          TEXT PRIMARY KEY,
-    flight_id   TEXT NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
-    status      TEXT NOT NULL,        -- queued | processing | done | failed
-    error       TEXT,
-    created_at  REAL NOT NULL,
-    updated_at  REAL NOT NULL
-);
-CREATE TABLE IF NOT EXISTS profiles (
-    name        TEXT PRIMARY KEY,
-    source      TEXT NOT NULL,        -- user | learned | file
-    overrides   TEXT NOT NULL,        -- JSON {check_id: {key: value}}
-    notes       TEXT,
-    basis       TEXT,                 -- JSON, learned profiles only
-    created_at  REAL NOT NULL
-);
-CREATE TABLE IF NOT EXISTS reviews (
-    flight_id    TEXT NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
-    finding_key  TEXT NOT NULL,       -- reviews.finding_key: check@start second
-    check_id     TEXT NOT NULL,
-    severity     TEXT NOT NULL,
-    title        TEXT NOT NULL,
-    t_start      REAL,
-    t_end        REAL,
-    status       TEXT NOT NULL,       -- confirmed | false_alarm | accepted
-    note         TEXT,
-    reviewed_at  REAL NOT NULL,
-    PRIMARY KEY (flight_id, finding_key)
-);
-CREATE TABLE IF NOT EXISTS aircraft_profiles (
-    aircraft_key  TEXT PRIMARY KEY,   -- fleet.aircraft_key: label:<name> or sn:<serial>
-    profile_name  TEXT NOT NULL REFERENCES profiles(name) ON DELETE CASCADE ON UPDATE CASCADE
-);
-"""
+from flightlens.provenance import stale_reasons
+from flightlens.schema import migrate
 
 
 def safe_name(signal: str) -> str:
@@ -124,8 +68,7 @@ class Store:
         self._db = sqlite3.connect(self.root / "flightlens.db", check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA foreign_keys = ON")
-        self._db.executescript(SCHEMA)
-        self._migrate()
+        self.schema_from, self.schema_version = migrate(self._db, self.root / "flightlens.db")
         # Jobs interrupted by a restart are failed, never left "processing".
         self._db.execute(
             "UPDATE jobs SET status='failed', error='Interrupted by a restart; upload again' "
@@ -136,25 +79,6 @@ class Store:
             "WHERE status IN ('queued','processing')"
         )
         self._db.commit()
-
-    def _migrate(self) -> None:
-        """Add columns that newer versions need to a database made by an older one."""
-        have = {r["name"] for r in self._db.execute("PRAGMA table_info(flights)")}
-        for column in ("serial", "metrics", "versions"):
-            if column not in have:
-                self._db.execute(f"ALTER TABLE flights ADD COLUMN {column} TEXT")
-        self._db.execute("CREATE INDEX IF NOT EXISTS flights_serial ON flights(serial)")
-        # Analyses made before versions were indexed: read them from the stored report.
-        rows = self._db.execute(
-            "SELECT id FROM flights WHERE status='done' AND versions IS NULL"
-        ).fetchall()
-        for row in rows:
-            report = self.read_report(row["id"])
-            if report is not None:
-                self._db.execute(
-                    "UPDATE flights SET versions=? WHERE id=?",
-                    (json.dumps(versions_of(report)), row["id"]),
-                )
 
     # --- paths ---------------------------------------------------------------
 

@@ -9,6 +9,12 @@ thresholds do.
 ## [0.2.0] - unreleased
 
 ### Added
+- **Data safety**: the database schema is versioned (`PRAGMA user_version`)
+  with ordered, transactional migrations; an upgrade keeps a copy of the old
+  database and a newer library is refused. `flightlens backup` (consistent
+  while the server runs) and `flightlens restore` (into a new folder only,
+  SHA-256 checked, path-safe); `flightlens prune` for retention (lists first,
+  keeps reviewed flights, deletes only with `--yes`).
 - **MAVLink telemetry logs (`.tlog`)** from ArduPilot and PX4, as Mission
   Planner and QGroundControl record them: an own MAVLink v1/v2 decoder
   (signed frames, CRC-checked, damaged bytes skipped; definitions tested

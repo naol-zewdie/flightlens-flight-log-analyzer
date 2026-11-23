@@ -126,6 +126,7 @@ def test_outdated_flight_is_flagged_and_reanalyzed(client: TestClient, data_dir:
 def test_versions_are_backfilled_from_old_reports(data_dir: Path) -> None:
     db = sqlite3.connect(data_dir / "flightlens.db")
     db.execute("UPDATE flights SET versions=NULL")
+    db.execute("PRAGMA user_version = 3")  # as a library from before analysis versions
     db.commit()
     db.close()
     store = Store(data_dir)  # migration reads them back from report.json

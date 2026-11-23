@@ -299,6 +299,123 @@ def profile_learn_cmd(
     console.print(f"Profile {profile.name} ({profile.digest}) written to {out}")
 
 
+DataOpt = Annotated[
+    Path | None,
+    typer.Option("--data", help="Library folder (default: $FLIGHTLENS_DATA or ./data)."),
+]
+
+
+def _data_dir(data: Path | None) -> Path:
+    import os
+
+    return data or Path(os.environ.get("FLIGHTLENS_DATA", "data"))
+
+
+@app.command("backup")
+def backup_cmd(
+    out: Annotated[Path, typer.Argument(help="Backup file to write (.zip).")],
+    data: DataOpt = None,
+    no_analysis: Annotated[
+        bool,
+        typer.Option(
+            "--no-analysis",
+            help="Leave out analysis results (much smaller; they are rebuilt on restore).",
+        ),
+    ] = False,
+) -> None:
+    """Back up the library: database, original logs and analysis results.
+
+    Safe while `flightlens serve` is running: the database is copied with
+    SQLite's online backup, so the copy is consistent.
+    """
+    from flightlens import backup
+
+    try:
+        s = backup.create(_data_dir(data), out, include_analysis=not no_analysis)
+    except backup.BackupError as exc:
+        err_console.print(f"[red]error:[/] {exc}")
+        raise typer.Exit(EXIT_USAGE) from None
+    console.print(
+        f"{s.flights} flights backed up to {s.path} ({s.size_bytes / 1e6:.1f} MB"
+        f"{'' if s.included_analysis else ', without analysis results'})"
+    )
+
+
+@app.command("restore")
+def restore_cmd(
+    backup_file: Annotated[
+        Path, typer.Argument(help="Backup file (.zip) from `flightlens backup`.")
+    ],
+    data: Annotated[
+        Path, typer.Option("--data", help="New, empty folder to restore the library into.")
+    ],
+) -> None:
+    """Restore a backup into a new folder (never over an existing library).
+
+    Every original log is checked against its SHA-256 before anything is put
+    in place. Start the server on the restored folder with
+    `flightlens serve --data <folder>`.
+    """
+    from flightlens import backup
+
+    try:
+        result = backup.restore(
+            backup_file, data, progress=lambda name: console.print(f"  re-analyzing {name}")
+        )
+    except backup.BackupError as exc:
+        err_console.print(f"[red]error:[/] {exc}")
+        raise typer.Exit(EXIT_USAGE) from None
+    m = result["manifest"]
+    console.print(
+        f"Restored {result['flights']} flights (backup of {m['created']}, FlightLens "
+        f"{m['flightlens_version']}) into {data}"
+        + (f"; {result['reanalyzed']} re-analyzed" if result["reanalyzed"] else "")
+    )
+
+
+@app.command("prune")
+def prune_cmd(
+    older_than: Annotated[
+        float, typer.Option("--older-than", help="Remove flights older than this many days.")
+    ],
+    data: DataOpt = None,
+    yes: Annotated[
+        bool, typer.Option("--yes", help="Delete them; without it, only list what would go.")
+    ] = False,
+    include_reviewed: Annotated[
+        bool,
+        typer.Option("--include-reviewed", help="Also remove flights an engineer has reviewed."),
+    ] = False,
+) -> None:
+    """Remove old flights from the library (lists them first; deletes only with --yes)."""
+    from datetime import UTC, datetime
+
+    from flightlens import retention
+    from flightlens.store import Store
+
+    data_dir = _data_dir(data)
+    if not (data_dir / "flightlens.db").is_file():
+        err_console.print(f"[red]error:[/] {data_dir} is not a FlightLens library")
+        raise typer.Exit(EXIT_USAGE)
+    store = Store(data_dir)
+    chosen = retention.candidates(store, older_than, keep_reviewed=not include_reviewed)
+    if not chosen:
+        console.print(f"No flights older than {older_than:g} days.")
+        return
+    for c in chosen:
+        when = datetime.fromtimestamp(c.when, tz=UTC).strftime("%Y-%m-%d")
+        console.print(f"  {when}  {c.filename}  ({c.size_bytes / 1e6:.1f} MB)")
+    total = sum(c.size_bytes for c in chosen) / 1e6
+    if not yes:
+        console.print(
+            f"{len(chosen)} flights ({total:.1f} MB of logs) would be removed. "
+            "Run again with --yes to delete them; consider `flightlens backup` first."
+        )
+        return
+    n = retention.prune(store, chosen)
+    console.print(f"Removed {n} flights ({total:.1f} MB of logs).")
+
+
 @reviews_app.command("export")
 def reviews_export_cmd(
     out: Annotated[Path, typer.Option("--out", help="Write the manifest to this .yaml file.")],

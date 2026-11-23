@@ -191,7 +191,30 @@ a time limit, so even an unknown failure cannot take it down.
 
 | What | Where |
 |---|---|
-| Flight index, jobs, aircraft names, trend metrics, threshold profiles, reviews, analysis versions | SQLite (`data/flightlens.db`), migrated in place on upgrade |
+| Flight index, jobs, aircraft names, trend metrics, threshold profiles, reviews, analysis versions | SQLite (`data/flightlens.db`), schema versioned |
 | Original logs | `data/flights/<id>/`, unchanged |
 | Signals | one Parquet file per signal, zstd |
 | Report, spectrum | JSON next to the signals |
+
+**Upgrades.** The database records its schema version. Opening a library made
+by an older FlightLens applies the missing migrations in order, each in its own
+transaction, and first keeps a copy of the database
+(`flightlens.db.before-v<N>`). A library written by a *newer* FlightLens is
+refused rather than misread.
+
+**Backup and restore.** `flightlens backup lib.zip` writes one file with a
+consistent copy of the database (SQLite's online backup: safe while the server
+runs), every original log and the analysis results (`--no-analysis` leaves
+those out; restore rebuilds them). `flightlens restore lib.zip --data newdir`
+only writes into an empty folder, checks every original against its SHA-256
+before anything is put in place, and refuses archive paths that would land
+outside the folder. With Docker:
+
+```bash
+docker compose exec flightlens flightlens backup /data/backup.zip
+docker compose cp flightlens:/data/backup.zip .
+```
+
+**Retention.** Nothing is deleted automatically. `flightlens prune --older-than
+365` lists the flights older than a year (by the flight's date) and keeps those
+an engineer reviewed; `--yes` deletes them.

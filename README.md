@@ -60,6 +60,9 @@ uv run flightlens serve          # http://localhost:8000, data in ./data
 | `flightlens demo [--read-only]` | Generates example flights with known faults and opens them in the web app |
 | `flightlens checks` | Lists the checks, their signals and default thresholds |
 | `flightlens validate <manifest or folder>` | Scores FlightLens against labelled logs: per-check recall, precision, false alarms; exit 1 if any log is wrong |
+| `flightlens backup lib.zip [--no-analysis]` | Backs up the library (database, original logs, results); safe while the server runs |
+| `flightlens restore lib.zip --data newdir` | Restores a backup into a new folder, checking every log's SHA-256 |
+| `flightlens prune --older-than 365 [--yes]` | Lists flights older than N days, keeps reviewed ones; deletes only with `--yes` |
 | `flightlens reviews export --data data --out reviews.yaml` | Exports engineer reviews of findings as a validation manifest for `flightlens validate` |
 | `flightlens profile learn <folder> --name N --out N.yaml` | Learns attention thresholds from one aircraft's own flights; use the file with `--profile` on `analyze`, `batch` and `validate` |
 
@@ -147,7 +150,7 @@ Drop the file in `src/flightlens/checks/`; it is discovered automatically. Add s
 ## Development
 
 ```bash
-uv run pytest                                   # 362 tests (FLIGHTLENS_SLOW=1 adds a 100 MB test)
+uv run pytest                                   # 373 tests (FLIGHTLENS_SLOW=1 adds a 100 MB test)
 uv run ruff check . && uv run ruff format --check . && uv run mypy
 cd web && npm run dev                           # UI with hot reload; run `uv run flightlens serve` alongside
 uv run python scripts/fetch_px4_logs.py --count 20   # public test logs into testdata/real/

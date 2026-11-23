@@ -15,7 +15,7 @@
 # Signals that need computation (attitude angles from quaternions, motors,
 # vibration across IMUs, arming segments, events) are built in ulog.py.
 
-version: "px4-2026.11.4"
+version: "px4-2026.11.5"
 
 signals:
   # Battery
@@ -213,6 +213,100 @@ signals:
     sources:
       - { topic: estimator_selector_status, field: primary_instance }
 
+  # Barometric altitude (AMSL from standard atmosphere), wind estimate, airspeed
+  - name: baro.alt
+    unit: m
+    sources: [{ topic: vehicle_air_data, field: baro_alt_meter }]
+  - name: wind.n
+    unit: m/s
+    sources:
+      - { topic: wind, field: windspeed_north }
+      - { topic: wind_estimate, field: windspeed_north }
+  - name: wind.e
+    unit: m/s
+    sources:
+      - { topic: wind, field: windspeed_east }
+      - { topic: wind_estimate, field: windspeed_east }
+  - name: airspeed
+    unit: m/s
+    sources: [{ topic: airspeed_validated, field: true_airspeed_m_s, min_valid: 0 }]
+
+  # ESC telemetry (BLHeli/AM32 telemetry or bidirectional DShot), motors 1-8.
+  # 0 degC means the ESC does not report temperature; absurd currents are dropped.
+  - name: esc.1.rpm
+    unit: rpm
+    sources: [{ topic: esc_status, field: "esc[0].esc_rpm" }]
+  - name: esc.1.temp
+    unit: degC
+    sources: [{ topic: esc_status, field: "esc[0].esc_temperature", zero_is_missing: true, max_valid: 200 }]
+  - name: esc.1.curr
+    unit: A
+    sources: [{ topic: esc_status, field: "esc[0].esc_current", min_valid: 0, max_valid: 500 }]
+  - name: esc.2.rpm
+    unit: rpm
+    sources: [{ topic: esc_status, field: "esc[1].esc_rpm" }]
+  - name: esc.2.temp
+    unit: degC
+    sources: [{ topic: esc_status, field: "esc[1].esc_temperature", zero_is_missing: true, max_valid: 200 }]
+  - name: esc.2.curr
+    unit: A
+    sources: [{ topic: esc_status, field: "esc[1].esc_current", min_valid: 0, max_valid: 500 }]
+  - name: esc.3.rpm
+    unit: rpm
+    sources: [{ topic: esc_status, field: "esc[2].esc_rpm" }]
+  - name: esc.3.temp
+    unit: degC
+    sources: [{ topic: esc_status, field: "esc[2].esc_temperature", zero_is_missing: true, max_valid: 200 }]
+  - name: esc.3.curr
+    unit: A
+    sources: [{ topic: esc_status, field: "esc[2].esc_current", min_valid: 0, max_valid: 500 }]
+  - name: esc.4.rpm
+    unit: rpm
+    sources: [{ topic: esc_status, field: "esc[3].esc_rpm" }]
+  - name: esc.4.temp
+    unit: degC
+    sources: [{ topic: esc_status, field: "esc[3].esc_temperature", zero_is_missing: true, max_valid: 200 }]
+  - name: esc.4.curr
+    unit: A
+    sources: [{ topic: esc_status, field: "esc[3].esc_current", min_valid: 0, max_valid: 500 }]
+  - name: esc.5.rpm
+    unit: rpm
+    sources: [{ topic: esc_status, field: "esc[4].esc_rpm" }]
+  - name: esc.5.temp
+    unit: degC
+    sources: [{ topic: esc_status, field: "esc[4].esc_temperature", zero_is_missing: true, max_valid: 200 }]
+  - name: esc.5.curr
+    unit: A
+    sources: [{ topic: esc_status, field: "esc[4].esc_current", min_valid: 0, max_valid: 500 }]
+  - name: esc.6.rpm
+    unit: rpm
+    sources: [{ topic: esc_status, field: "esc[5].esc_rpm" }]
+  - name: esc.6.temp
+    unit: degC
+    sources: [{ topic: esc_status, field: "esc[5].esc_temperature", zero_is_missing: true, max_valid: 200 }]
+  - name: esc.6.curr
+    unit: A
+    sources: [{ topic: esc_status, field: "esc[5].esc_current", min_valid: 0, max_valid: 500 }]
+  - name: esc.7.rpm
+    unit: rpm
+    sources: [{ topic: esc_status, field: "esc[6].esc_rpm" }]
+  - name: esc.7.temp
+    unit: degC
+    sources: [{ topic: esc_status, field: "esc[6].esc_temperature", zero_is_missing: true, max_valid: 200 }]
+  - name: esc.7.curr
+    unit: A
+    sources: [{ topic: esc_status, field: "esc[6].esc_current", min_valid: 0, max_valid: 500 }]
+  - name: esc.8.rpm
+    unit: rpm
+    sources: [{ topic: esc_status, field: "esc[7].esc_rpm" }]
+  - name: esc.8.temp
+    unit: degC
+    sources: [{ topic: esc_status, field: "esc[7].esc_temperature", zero_is_missing: true, max_valid: 200 }]
+  - name: esc.8.curr
+    unit: A
+    sources: [{ topic: esc_status, field: "esc[7].esc_current", min_valid: 0, max_valid: 500 }]
+
+
 # Topics read by the computed signals in ulog.py.
 computed_topics:
   - vehicle_attitude
@@ -224,3 +318,4 @@ computed_topics:
   - actuator_outputs
   - vehicle_status
   - sensor_gps
+

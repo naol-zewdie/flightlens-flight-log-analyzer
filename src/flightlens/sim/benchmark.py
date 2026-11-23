@@ -77,6 +77,9 @@ def copter(
     w.define("MAG", "QBfff", "TimeUS,I,MagX,MagY,MagZ")
     w.define("RCOU", "Q" + "H" * 8, "TimeUS," + ",".join(f"C{i}" for i in range(1, 9)))
     w.define("CTUN", "Qf", "TimeUS,ThO")
+    w.define("BARO", "QBff", "TimeUS,I,Alt,Press")
+    w.define("XKF2", "QBcc", "TimeUS,C,VWN,VWE")
+    w.define("ESC", "QBffffcfcf", "TimeUS,Instance,RPM,RawRPM,Volt,Curr,Temp,CTot,MotTemp,Err")
     w.define("ISBH", "QHBBHHQf", "TimeUS,N,type,instance,mul,smp_cnt,SampleUS,smp_rate")
     w.define("ISBD", "QHHaaa", "TimeUS,N,seqno,x,y,z")
 
@@ -253,6 +256,24 @@ def copter(
         )
         w.write("POS", TimeUS=us(t), Lat=lat, Lng=149.1652, Alt=584 + alt, RelHomeAlt=alt)
 
+        # two barometers (height above the boot point); drift grows from takeoff on
+        baro = alt + rng.normal(0, 0.15)
+        if kind == "baro_drift" and t > 8:
+            baro += level * min(1.0, (t - 8) / (LAND - 8))
+        baro2 = alt + 0.8 + rng.normal(0, 0.15)  # a fixed offset is normal
+        if kind == "baro_dual" and within(t):
+            baro2 += level
+        w.write("BARO", TimeUS=us(t), I=0, Alt=baro, Press=101325 - 12 * baro)
+        w.write("BARO", TimeUS=us(t), I=1, Alt=baro2, Press=101325 - 12 * baro2)
+
+        # the estimator's wind (ArduCopter with EK3_DRAG_BCOEF set), light by default
+        wind = level if kind == "wind" and within(t) else 3.0
+        if flying:
+            vwn, vwe = wind * 0.8 + rng.normal(0, 0.3), wind * 0.6 + rng.normal(0, 0.3)
+        else:
+            vwn = vwe = 0.0
+        w.write("XKF2", TimeUS=us(t), C=0, VWN=vwn, VWE=vwe)
+
         sv = abs(rng.normal(0.15, 0.05))
         if kind == "ekf" and within(t):
             sv = level
@@ -282,6 +303,19 @@ def copter(
         else:
             pwm = np.full(4, 1100.0 if armed else 1000.0)
         w.write("RCOU", TimeUS=us(t), C1=pwm[0], C2=pwm[1], C3=pwm[2], C4=pwm[3])
+
+        # ESC telemetry (bidirectional DShot): RPM follows the output, temperature
+        # rises slowly with load; motor 2 is the one faults are put on
+        for m in range(4):
+            out = max(0.0, (pwm[m] - 1000) / 1000) if armed else 0.0
+            rpm = 22000 * out + rng.normal(0, 150) if out > 0.05 else 0.0
+            temp = 32 + 14 * min(1.0, max(0.0, t - 8) / 90) + rng.normal(0, 0.4)
+            if m == 1 and kind == "esc_hot" and within(t):
+                temp += (level - 46) * (t - fault.start) / (fault.end - fault.start)  # type: ignore[union-attr]
+            if m == 1 and kind == "esc_stall" and within(t):
+                rpm = abs(rng.normal(120, 40))  # commanded, but not turning
+            w.write("ESC", TimeUS=us(t) + m, Instance=m, RPM=max(rpm, 0.0), Volt=volt,
+                    Curr=out * 18, Temp=temp)  # fmt: skip
         tho = thr if flying else (0.75 if kind == "takeoff_failure" and armed and t >= 8 else 0.0)
         w.write("CTUN", TimeUS=us(t), ThO=tho)
     return w.save(path)
@@ -431,6 +465,26 @@ def scenarios() -> list[Scenario]:
         verdict="problem",
         allow=["attitude.tracking", "events.failsafes", "control.attitude_limits"],
     )
+    f = Fault("esc_hot", 60, 140, 118)
+    add("copter-esc-overheat", "ESC", f, [_win("esc.health", "problem", f, 40)],
+        verdict="problem")  # fmt: skip
+    f = Fault("esc_hot", 60, 140, 85)
+    add("copter-esc-warm", "healthy (near limit)", f, [], verdict="healthy")
+    f = Fault("esc_stall", 70, 72)
+    add("copter-motor-stopped", "ESC", f, [_win("esc.health", "problem", f, 2)],
+        verdict="problem")  # fmt: skip
+    f = Fault("baro_drift", level=10)
+    add("copter-baro-drift", "barometer", f, ["baro.health:problem"], verdict="problem")
+    f = Fault("baro_drift", level=3)
+    add("copter-baro-drift-small", "healthy (near limit)", f, [], verdict="healthy")
+    f = Fault("baro_dual", 60, 90, 12)
+    add("copter-baros-disagree", "barometer", f, [_win("baro.health", "problem", f)],
+        verdict="problem")  # fmt: skip
+    f = Fault("wind", 40, 120, 13)
+    add("copter-strong-wind", "wind", f, [_win("wind.speed", "attention", f, 10)],
+        verdict="attention")  # fmt: skip
+    f = Fault("wind", 40, 120, 8.5)
+    add("copter-wind-below-limit", "healthy (near limit)", f, [], verdict="healthy")
     f = Fault("gyro_noise", level=12.0)
     add("copter-gyro-noise", "gyro noise", f, ["vibration.spectrum:attention"],
         verdict="attention")  # fmt: skip

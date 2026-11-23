@@ -33,6 +33,35 @@ Version 1.1.0 · signals: `att.roll`, `att.pitch`, `att.des_roll`, `att.des_pitc
 | `yaw_problem` | 30 |
 | `min_duration_s` | 2 |
 
+## Barometer: drift over the flight, and two barometers that disagree
+
+**baro.health** — signal ``baro.alt`` (PX4 ``vehicle_air_data.baro_alt_meter``,
+ArduPilot ``BARO.Alt``).
+
+* *Drift*: the barometric height at rest just before takeoff and just after
+  landing should differ by as much as the ground does. The ground's change is
+  taken from GPS altitude averaged at rest, where GPS is reliable (in flight it
+  lags and drifts: on real crashes the barometer read 0 m on the ground while
+  GPS still said 24 m, so barometer and GPS are *not* compared in the air).
+  Attention above ``drift_attention`` (4 m), Problem above ``drift_problem``
+  (8 m). Real flights of up to 11 minutes drift 1.7 m at most.
+* *Two barometers* (ArduPilot ``BARO`` instance 1): after removing their fixed
+  offset, Attention when they disagree by more than ``dual_attention`` (5 m),
+  Problem above ``dual_problem`` (10 m), held ``dual_min_s`` (3 s) in the air.
+
+### `baro.health` · Barometer
+
+Version 1.0.0 · signals: `baro.alt`
+
+| Setting | Default |
+|---|---|
+| `drift_attention` | 4 |
+| `drift_problem` | 8 |
+| `rest_window_s` | 5 |
+| `dual_attention` | 5 |
+| `dual_problem` | 10 |
+| `dual_min_s` | 3 |
+
 ## Power and link checks: the autopilot's 5 V supply, battery reserve, RC link
 
 **power.supply** — signal ``power.5v`` (V; PX4 ``system_power.voltage5v_v``,
@@ -231,6 +260,38 @@ Version 1.0.0 · signals: `rate.roll`, `rate.des_roll`
 | `final_max` | 1.6 |
 | `rise_attention_s` | 0.3 |
 | `fw_rise_attention_s` | 0.8 |
+
+## ESC telemetry: temperatures, and motors that stop while commanded to spin
+
+**esc.health** — signals ``esc.N.rpm`` and ``esc.N.temp`` (PX4 ``esc_status``,
+ArduPilot ``ESC``; BLHeli/AM32 telemetry or bidirectional DShot), in the air.
+
+* *Temperature*: Attention above ``temp_attention`` (90 °C), Problem above
+  ``temp_problem`` (110 °C), held ``temp_min_s`` (2 s). In the public logs that
+  report it, ESCs peak at 25-63 °C. 0 °C means "not reported" and is ignored.
+* *Stopped motor*: on a multirotor, a motor commanded above ``stall_command``
+  (30% output) that turns at less than ``stall_ratio`` (20%) of the other
+  motors' median RPM, while those turn faster than ``min_rpm_others``
+  (1000 rpm), for ``stall_min_s`` (0.5 s): a desync, a failed ESC or a broken
+  motor. Short dips (real logs reach 10 rpm while the output is near idle) are
+  not judged, because the motor is not being asked to spin.
+
+Telemetry that is logged but carries no RPM and no temperature in the air
+(seen on public PX4 logs: every value 0) is *not evaluated*, never OK.
+
+### `esc.health` · ESC telemetry
+
+Version 1.0.0 · signals: `esc.1.rpm`
+
+| Setting | Default |
+|---|---|
+| `temp_attention` | 90 |
+| `temp_problem` | 110 |
+| `temp_min_s` | 2 |
+| `stall_command` | 0.3 |
+| `stall_ratio` | 0.2 |
+| `stall_min_s` | 0.5 |
+| `min_rpm_others` | 1000 |
 
 ## Estimator (EKF) health check
 
@@ -485,6 +546,33 @@ Version 1.0.0 · signals: `gyro.raw.x`, `gyro.raw.y`, `gyro.raw.z`
 |---|---|
 | `min_peak_db` | 15 |
 | `attention_rms` | 1 |
+
+## Wind: how strong the wind was, from the estimator
+
+**wind.speed** — signals ``wind.n`` and ``wind.e`` (PX4 ``wind``, ArduPilot
+``XKF2.VWN/VWE``), in the air, smoothed with a running median over
+``window_s`` (10 s) so a gust or the estimator's reaction to an impact does
+not count. Attention above ``attention`` (10 m/s, about 20 kt) for at least
+the window. Strong wind is a condition of the flight, not a fault of the
+aircraft, so it never raises Problem; it is reported so a crash or poor
+tracking can be read against it. On real ArduPlane flights the wind averaged
+0.2-2.5 m/s.
+
+Impact windows (a crash, a hard landing) are left out: the estimator's wind
+jumps there (13.5 m/s for 0.7 s at a real ArduPlane crash).
+
+ArduCopter only estimates wind with ``EK3_DRAG_BCOEF_X/Y`` set; a wind
+estimate stuck at 0 is *not evaluated*.
+
+### `wind.speed` · Wind
+
+Version 1.0.0 · signals: `wind.n`, `wind.e`
+
+| Setting | Default |
+|---|---|
+| `attention` | 10 |
+| `window_s` | 10 |
+| `min_estimate` | 0.05 |
 
 ## Trend metrics (aircraft pages)
 

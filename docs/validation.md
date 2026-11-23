@@ -27,14 +27,16 @@ like that. That evidence comes from the real labelled logs
 CI runs this benchmark (`tests/test_validation.py`) and fails if any log is
 not fully correct, so a threshold or logic regression cannot ship.
 
-**46 of 46 logs fully correct.**
+**54 of 54 logs fully correct.**
 
 ## By fault
 
 | Fault | Logs fully correct |
 |---|---|
+| ESC | 2 / 2 |
 | GPS | 3 / 3 |
 | attitude | 1 / 1 |
+| barometer | 2 / 2 |
 | battery | 4 / 4 |
 | clipping | 1 / 1 |
 | compass | 2 / 2 |
@@ -44,19 +46,21 @@ not fully correct, so a threshold or logic regression cannot ship.
 | gyro noise | 1 / 1 |
 | hard landing | 1 / 1 |
 | healthy | 5 / 5 |
-| healthy (near limit) | 8 / 8 |
+| healthy (near limit) | 11 / 11 |
 | motor | 2 / 2 |
 | never flew | 2 / 2 |
 | power | 2 / 2 |
 | trim | 1 / 1 |
 | tuning | 3 / 3 |
 | vibration | 3 / 3 |
+| wind | 1 / 1 |
 
 ## By check
 
 | Check | Expected | Detected | Right severity | False alarms | Recall | Precision | Median start error |
 |---|---|---|---|---|---|---|---|
 | `attitude.tracking` | 1 | 1 | 1 | 0 | 100% | 100% | 0.0 s |
+| `baro.health` | 2 | 2 | 2 | 0 | 100% | 100% | 0.0 s |
 | `battery.reserve` | 2 | 2 | 2 | 0 | 100% | 100% | – |
 | `battery.sag` | 2 | 2 | 2 | 0 | 100% | 100% | 0.1 s |
 | `compass.interference` | 2 | 2 | 2 | 0 | 100% | 100% | – |
@@ -64,6 +68,7 @@ not fully correct, so a threshold or logic regression cannot ship.
 | `control.saturation` | 1 | 1 | 1 | 0 | 100% | 100% | – |
 | `control.trim` | 2 | 2 | 2 | 0 | 100% | 100% | – |
 | `control.tuning` | 3 | 3 | 3 | 0 | 100% | 100% | – |
+| `esc.health` | 2 | 2 | 2 | 0 | 100% | 100% | 35.2 s |
 | `estimator.health` | 1 | 1 | 1 | 0 | 100% | 100% | 0.0 s |
 | `estimator.lanes` | 1 | 1 | 1 | 0 | 100% | 100% | 0.0 s |
 | `events.failsafes` | 3 | 3 | 3 | 0 | 100% | 100% | 0.0 s |
@@ -77,3 +82,4 @@ not fully correct, so a threshold or logic regression cannot ship.
 | `preflight.arming` | 1 | 1 | 1 | 0 | 100% | 100% | – |
 | `vibration.level` | 3 | 3 | 3 | 0 | 100% | 100% | 0.0 s |
 | `vibration.spectrum` | 1 | 1 | 1 | 0 | 100% | 100% | – |
+| `wind.speed` | 1 | 1 | 1 | 0 | 100% | 100% | 0.0 s |

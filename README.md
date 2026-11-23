@@ -14,7 +14,7 @@ Verdict: PROBLEM   (health score 10/100)
 ✔ OK         Attitude tracking, Estimator health, Errors and failsafes, GPS quality, ...
 ```
 
-**Status:** PX4 `.ulg`, ArduPilot `.bin` and MAVLink telemetry `.tlog` logs (from either firmware, as Mission Planner or QGroundControl record them) are supported end to end (CLI, web app, Docker), with the same checks and report for all. Validated on 28 real public PX4 logs, 15 real ArduPlane logs, 8 PX4 SITL sessions and a 46-log fault benchmark ([docs/validation.md](docs/validation.md)).
+**Status:** PX4 `.ulg`, ArduPilot `.bin` and MAVLink telemetry `.tlog` logs (from either firmware, as Mission Planner or QGroundControl record them) are supported end to end (CLI, web app, Docker), with the same checks and report for all. Validated on 28 real public PX4 logs, 15 real ArduPlane logs, 8 PX4 SITL sessions and a 54-log fault benchmark ([docs/validation.md](docs/validation.md)).
 
 ![FlightLens: a crash diagnosed with its likely causes and the evidence](docs/img/crash-light.png)
 
@@ -93,6 +93,9 @@ Exit codes for `analyze` (for CI): `0` healthy · `1` attention · `2` problem �
 | **Compass interference** | magnetometer vs `battery_status.current_a` | `MAG` vs `BAT.Curr` | field the power wiring adds at full current, against the Earth's field (compassmot's limits) |
 | **Estimator lane switches** | `estimator_selector_status` | `XKF4.PI` | the flight controller changed estimator (IMU) in flight |
 | **RC link** | `input_rc.rc_lost` | (failsafe events) | RC signal lost in the air |
+| **ESC telemetry** | `esc_status` | `ESC` | ESC above 90 / 110 °C; a motor commanded to spin that turns at under 20% of the others (desync, failed ESC); telemetry of zeros is not evaluated |
+| **Barometer** | `vehicle_air_data.baro_alt_meter` | `BARO` (both instances) | height drift between takeoff and landing against GPS at rest (4 / 8 m); two barometers that disagree (5 / 10 m) |
+| **Wind** | `wind` | `XKF2.VWN/VWE` | estimated wind above 10 m/s over 10 s (Attention only: a condition, not a fault); impacts left out |
 | **Gyro noise and filters** | raw gyro `sensor_gyro_fifo` (or `sensor_combined`) | batch sampler `ISBH/ISBD` or `GYR` | a noise peak that gets past the low-pass with no notch covering it; gives `INS_HNTCH_*` / `IMU_GYRO_*` values, and tells motor noise (follows throttle) from frame resonance. Spectrum and spectrogram in the UI |
 
 Checks only judge time **in the air**: armed, not landed (land detector, or ArduPlane `STAT.isFlying`), and in an armed period whose altitude actually changed. Short impact spikes (touchdown, crash) are reported by the crash check, not as vibration or clipping. On fixed wing, yaw is never tracked (there is no yaw setpoint), and an axis whose setpoint never changes is skipped.
@@ -105,7 +108,7 @@ Every claim is checked against logs with a known outcome, using one label format
 
 | Set | Logs | Result |
 |---|---|---|
-| Fault benchmark (generated, one injected fault each, healthy flights near every limit) | 46 (5 as telemetry logs) | 46 fully correct, 22 checks, 0 false alarms: [docs/validation.md](docs/validation.md) |
+| Fault benchmark (generated, one injected fault each, healthy flights near every limit) | 54 (5 as telemetry logs) | 54 fully correct, 25 checks, 0 false alarms: [docs/validation.md](docs/validation.md) |
 | Real ArduPlane crashes (owner's logs, not committed) | 15 | crashes and hard landings found with causes: [docs/real-log-results.md](docs/real-log-results.md) |
 | PX4 SITL sessions that never flew | 8 | arming refusals and failed takeoffs explained |
 | Public PX4 logs (Flight Review) | 28 | calibration set for the thresholds |
@@ -151,7 +154,7 @@ Drop the file in `src/flightlens/checks/`; it is discovered automatically. Add s
 ## Development
 
 ```bash
-uv run pytest                                   # 384 tests (FLIGHTLENS_SLOW=1 adds a 100 MB test)
+uv run pytest                                   # 393 tests (FLIGHTLENS_SLOW=1 adds a 100 MB test)
 uv run ruff check . && uv run ruff format --check . && uv run mypy
 cd web && npm run dev                           # UI with hot reload; run `uv run flightlens serve` alongside
 uv run python scripts/fetch_px4_logs.py --count 20   # public test logs into testdata/real/

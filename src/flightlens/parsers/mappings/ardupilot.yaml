@@ -17,7 +17,7 @@
 # SERVOn_FUNCTION, arming segments, landed state, modes, events, battery cell
 # count) are built in ardupilot.py.
 
-version: "ardupilot-2026.11.4"
+version: "ardupilot-2026.11.5"
 
 signals:
   # Attitude (deg)
@@ -205,6 +205,103 @@ signals:
   - name: rc.rssi
     unit: "%"
     sources: [{ topic: RSSI, field: RXRSSI, scale: 100, min_valid: 0, max_valid: 1 }]
+
+  # Barometers (altitude above the ground at boot) and the EKF wind estimate.
+  # Copter only estimates wind with EK3_DRAG_BCOEF set; otherwise it stays 0.
+  - name: baro.alt
+    unit: m
+    sources: [{ topic: BARO, instance: 0, field: Alt }]
+  - name: baro.alt2
+    unit: m
+    sources: [{ topic: BARO, instance: 1, field: Alt }]
+  - name: wind.n
+    unit: m/s
+    sources:
+      - { topic: XKF2, field: VWN }
+      - { topic: NKF2, field: VWN }
+  - name: wind.e
+    unit: m/s
+    sources:
+      - { topic: XKF2, field: VWE }
+      - { topic: NKF2, field: VWE }
+  - name: airspeed
+    unit: m/s
+    sources: [{ topic: ARSP, field: Airspeed, min_valid: 0 }]
+
+  # ESC telemetry (BLHeli/AM32 telemetry or bidirectional DShot), motors 1-8.
+  # 0 degC means the ESC does not report temperature; absurd currents are dropped.
+  - name: esc.1.rpm
+    unit: rpm
+    sources: [{ topic: ESC, instance: 0, field: RPM, min_valid: 0 }]
+  - name: esc.1.temp
+    unit: degC
+    sources: [{ topic: ESC, instance: 0, field: Temp, zero_is_missing: true, max_valid: 200 }]
+  - name: esc.1.curr
+    unit: A
+    sources: [{ topic: ESC, instance: 0, field: Curr, min_valid: 0, max_valid: 500 }]
+  - name: esc.2.rpm
+    unit: rpm
+    sources: [{ topic: ESC, instance: 1, field: RPM, min_valid: 0 }]
+  - name: esc.2.temp
+    unit: degC
+    sources: [{ topic: ESC, instance: 1, field: Temp, zero_is_missing: true, max_valid: 200 }]
+  - name: esc.2.curr
+    unit: A
+    sources: [{ topic: ESC, instance: 1, field: Curr, min_valid: 0, max_valid: 500 }]
+  - name: esc.3.rpm
+    unit: rpm
+    sources: [{ topic: ESC, instance: 2, field: RPM, min_valid: 0 }]
+  - name: esc.3.temp
+    unit: degC
+    sources: [{ topic: ESC, instance: 2, field: Temp, zero_is_missing: true, max_valid: 200 }]
+  - name: esc.3.curr
+    unit: A
+    sources: [{ topic: ESC, instance: 2, field: Curr, min_valid: 0, max_valid: 500 }]
+  - name: esc.4.rpm
+    unit: rpm
+    sources: [{ topic: ESC, instance: 3, field: RPM, min_valid: 0 }]
+  - name: esc.4.temp
+    unit: degC
+    sources: [{ topic: ESC, instance: 3, field: Temp, zero_is_missing: true, max_valid: 200 }]
+  - name: esc.4.curr
+    unit: A
+    sources: [{ topic: ESC, instance: 3, field: Curr, min_valid: 0, max_valid: 500 }]
+  - name: esc.5.rpm
+    unit: rpm
+    sources: [{ topic: ESC, instance: 4, field: RPM, min_valid: 0 }]
+  - name: esc.5.temp
+    unit: degC
+    sources: [{ topic: ESC, instance: 4, field: Temp, zero_is_missing: true, max_valid: 200 }]
+  - name: esc.5.curr
+    unit: A
+    sources: [{ topic: ESC, instance: 4, field: Curr, min_valid: 0, max_valid: 500 }]
+  - name: esc.6.rpm
+    unit: rpm
+    sources: [{ topic: ESC, instance: 5, field: RPM, min_valid: 0 }]
+  - name: esc.6.temp
+    unit: degC
+    sources: [{ topic: ESC, instance: 5, field: Temp, zero_is_missing: true, max_valid: 200 }]
+  - name: esc.6.curr
+    unit: A
+    sources: [{ topic: ESC, instance: 5, field: Curr, min_valid: 0, max_valid: 500 }]
+  - name: esc.7.rpm
+    unit: rpm
+    sources: [{ topic: ESC, instance: 6, field: RPM, min_valid: 0 }]
+  - name: esc.7.temp
+    unit: degC
+    sources: [{ topic: ESC, instance: 6, field: Temp, zero_is_missing: true, max_valid: 200 }]
+  - name: esc.7.curr
+    unit: A
+    sources: [{ topic: ESC, instance: 6, field: Curr, min_valid: 0, max_valid: 500 }]
+  - name: esc.8.rpm
+    unit: rpm
+    sources: [{ topic: ESC, instance: 7, field: RPM, min_valid: 0 }]
+  - name: esc.8.temp
+    unit: degC
+    sources: [{ topic: ESC, instance: 7, field: Temp, zero_is_missing: true, max_valid: 200 }]
+  - name: esc.8.curr
+    unit: A
+    sources: [{ topic: ESC, instance: 7, field: Curr, min_valid: 0, max_valid: 500 }]
 
 # Messages read by the computed signals in ardupilot.py.
 computed_topics:

@@ -9,6 +9,15 @@ thresholds do.
 ## [0.2.0] - unreleased
 
 ### Added
+- **ESC, barometer and wind checks** (`esc.health`, `baro.health`,
+  `wind.speed`) with new signals `esc.N.rpm/temp/curr`, `baro.alt`,
+  `baro.alt2`, `wind.n/e` and `airspeed` (mappings `px4-2026.11.5`,
+  `ardupilot-2026.11.5`). The barometer is judged by its drift between takeoff
+  and landing against GPS *at rest*, never against GPS in flight: on real
+  crashes GPS altitude lagged by 24 m while the barometer was right. Wind
+  leaves impacts out (the estimator read 13.5 m/s for 0.7 s at a real crash).
+  Calibrated on 20 real ArduPilot and 28 public PX4 logs: no Problem on any
+  of them. 8 benchmark scenarios (54 logs).
 - **Operations**: `/api/health` reports the database, job workers and disk
   (503 when down); Prometheus metrics at `/metrics`; request and analysis logs,
   as text or JSON (`--log-format json`), with an `X-Request-ID` on every

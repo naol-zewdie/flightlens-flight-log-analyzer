@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -35,6 +36,12 @@ from flightlens.schema import SCHEMA_VERSION
 FORMAT = "flightlens-backup"
 FORMAT_VERSION = 1
 DB_NAME = "flightlens.db"
+
+
+FLIGHT_ID = re.compile(r"^[0-9a-f]{16}$")
+"""A flight id is the first 16 hex digits of the log's SHA-256 (``Store.create_flight``)."""
+ORIGINAL = re.compile(r"^original\.[a-z0-9]{1,8}$")
+DISK_MARGIN = 256 * 1024**2
 
 
 class BackupError(RuntimeError):
@@ -117,7 +124,8 @@ def create(data_dir: Path, out: Path, include_analysis: bool = True) -> BackupSu
 
 def _safe_member(name: str) -> PurePosixPath:
     p = PurePosixPath(name)
-    if p.is_absolute() or ".." in p.parts or (p.parts and ":" in p.parts[0]):
+    # A backslash is a separator on Windows: "a\..\b" would escape there.
+    if "\\" in name or p.is_absolute() or ".." in p.parts or any(":" in part for part in p.parts):
         raise BackupError(f"unsafe path in backup: {name!r}")
     return p
 
@@ -130,6 +138,13 @@ def read_manifest(path: Path) -> dict[str, Any]:
         raise BackupError(f"{path.name} is not a FlightLens backup ({exc})") from None
     if manifest.get("format") != FORMAT:
         raise BackupError(f"{path.name} is not a FlightLens backup")
+    for f in manifest.get("flights", []):
+        if not (
+            FLIGHT_ID.match(str(f.get("id", ""))) and ORIGINAL.match(str(f.get("original", "")))
+        ):
+            raise BackupError(
+                f"{path.name} has an invalid flight entry; it was not made by FlightLens"
+            )
     if (
         int(manifest.get("format_version", 0)) > FORMAT_VERSION
         or int(manifest.get("schema_version", 0)) > SCHEMA_VERSION
@@ -158,6 +173,12 @@ def restore(
     ok = False
     try:
         with zipfile.ZipFile(backup) as z:
+            needed = sum(i.file_size for i in z.infolist())
+            free = shutil.disk_usage(data_dir).free
+            if needed + DISK_MARGIN > free:
+                raise BackupError(
+                    f"restoring needs {needed / 1e9:.1f} GB but only {free / 1e9:.1f} GB is free"
+                )
             for info in z.infolist():
                 rel = _safe_member(info.filename)
                 if info.is_dir() or rel.name == "manifest.json":
@@ -168,6 +189,7 @@ def restore(
                     shutil.copyfileobj(src, dst)
         if not (staging / DB_NAME).is_file():
             raise BackupError("the backup has no database")
+        _check_database(staging / DB_NAME)
         for f in manifest["flights"]:
             original = staging / "flights" / f["id"] / f["original"]
             if not original.is_file():
@@ -192,6 +214,26 @@ def restore(
 
     Store(data_dir)  # opens and, for an older backup, upgrades the database
     return {"flights": len(manifest["flights"]), "reanalyzed": rebuilt, "manifest": manifest}
+
+
+def _check_database(path: Path) -> None:
+    """Refuse a database whose flight ids could point outside the library."""
+    db = sqlite3.connect(path)
+    try:
+        # FlightLens creates no triggers or views; one in a backup would run on our writes
+        extra = db.execute(
+            "SELECT type, name FROM sqlite_master WHERE type IN ('trigger', 'view')"
+        ).fetchone()
+        if extra is not None:
+            raise BackupError(f"the backup's database contains a {extra[0]} ({extra[1]!r})")
+        ids = [r[0] for r in db.execute("SELECT id FROM flights")]
+    except sqlite3.DatabaseError as exc:
+        raise BackupError(f"the backup's database is unreadable ({exc})") from None
+    finally:
+        db.close()
+    bad = [i for i in ids if not FLIGHT_ID.match(str(i))]
+    if bad:
+        raise BackupError(f"the backup's database has invalid flight ids, e.g. {bad[0]!r}")
 
 
 def _reanalyze(

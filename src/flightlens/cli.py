@@ -666,6 +666,7 @@ def _serve(
     log_level: str = "info",
     shutdown_grace: float = 30.0,
 ) -> None:
+    import math
     import os
 
     import uvicorn
@@ -685,6 +686,14 @@ def _serve(
         hosts.append(host)
     hosts = [h for h in hosts if h]
 
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        import logging
+
+        logging.getLogger("flightlens.server").warning(
+            "listening beyond this computer with no login: anyone who can reach it can "
+            "upload, change and delete flights; keep it on a trusted network (see SECURITY.md)",
+            extra={"host": host, "read_only": read_only},
+        )
     web_dir = web or default_web_dir()
     if not (web_dir / "index.html").exists():
         err_console.print(f"[yellow]note:[/] no web UI at {web_dir}; serving the API only")
@@ -709,7 +718,9 @@ def _serve(
         log_config=None,  # setup_logging owns the handlers
         log_level="warning",
         access_log=False,
-        timeout_graceful_shutdown=int(shutdown_grace) or None,
+        # open requests get at most 10 s, then analyses get the grace period, so a
+        # stop takes at most grace + 20 s (docker-compose allows 45 s for the default)
+        timeout_graceful_shutdown=min(10, math.ceil(shutdown_grace)),
     )
 
 

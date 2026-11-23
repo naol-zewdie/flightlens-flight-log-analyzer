@@ -163,12 +163,15 @@ def migrate(db: sqlite3.Connection, db_path: Path) -> tuple[int, int]:
         return before, before
     if not _is_empty(db):
         # keep the database as it was before the upgrade, in case it goes wrong
+        # An existing copy is from an earlier, failed attempt: it holds the older
+        # database, so it is kept, never overwritten with a half-upgraded one.
         copy = db_path.with_name(f"{db_path.name}.before-v{SCHEMA_VERSION}")
-        dest = sqlite3.connect(copy)
-        try:
-            db.backup(dest)
-        finally:
-            dest.close()
+        if not copy.exists():
+            dest = sqlite3.connect(copy)
+            try:
+                db.backup(dest)
+            finally:
+                dest.close()
     data = db_path.parent
     db.commit()
     implicit = db.isolation_level

@@ -8,9 +8,11 @@ queued; parsing happens in an isolated child process (see ``worker.py``).
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import logging
+import re
 import shutil
 import time
 import uuid
@@ -53,7 +55,13 @@ TRACK_POINTS = 3_000
 MIN_FREE_BYTES = 512 * 1024**2
 """Uploads are refused when the data disk has less free space than this."""
 SHUTDOWN_GRACE_S = 30.0
-QUIET_PATHS = ("/api/health", "/metrics")
+QUIET_ROUTES = ("/api/health", "/metrics", "/api/jobs/{job_id}")
+"""Logged at DEBUG: probes, and the UI polling a job (static assets too)."""
+SECURITY_HEADERS = (
+    (b"x-content-type-options", b"nosniff"),
+    (b"referrer-policy", b"no-referrer"),
+    (b"x-frame-options", b"DENY"),
+)
 
 log = logging.getLogger("flightlens.server")
 http_log = logging.getLogger("flightlens.http")
@@ -146,8 +154,28 @@ def create_app(
     app.state.store = store
     app.state.runner = runner
     app.state.metrics = metrics
+
+    def upload_refusal(length: int) -> tuple[int, str, dict[str, str]] | None:
+        """Why an upload of ``length`` bytes cannot be taken now (checked before the
+        body is read, so a refused upload never reaches the disk)."""
+        refusal = None
+        if runner.full():
+            refusal = (
+                503,
+                f"The analysis queue is full ({runner.pending()} logs waiting); try again shortly",
+                {"Retry-After": "30"},
+            )
+        elif disk_free() < min_free_bytes + length:
+            refusal = (507, "The server is low on disk space; uploads are paused", {})
+        if refusal is not None:
+            metrics.inc("flightlens_uploads_total", {"result": f"refused_{refusal[0]}"})
+        return refusal
+
     app.add_middleware(
-        RequestGuard, allowed_hosts=tuple(h.lower() for h in allowed_hosts), read_only=read_only
+        RequestGuard,
+        allowed_hosts=tuple(h.lower() for h in allowed_hosts),
+        read_only=read_only,
+        upload_refusal=upload_refusal,
     )
     app.add_middleware(ObservedRequests, metrics=metrics)  # outermost: sees refusals too
 
@@ -716,6 +744,7 @@ def create_app(
     # --- web UI ------------------------------------------------------------------
 
     if web_dir is not None and (web_dir / "index.html").exists():
+        page_csp = spa_csp((web_dir / "index.html").read_text(encoding="utf-8"))
         assets = web_dir / "assets"
         if assets.exists():
             app.mount("/assets", StaticFiles(directory=assets), name="assets")
@@ -727,9 +756,26 @@ def create_app(
             candidate = (web_dir / path).resolve()
             if path and candidate.is_file() and web_dir.resolve() in candidate.parents:
                 return FileResponse(candidate)
-            return FileResponse(web_dir / "index.html")
+            return FileResponse(
+                web_dir / "index.html", headers={"Content-Security-Policy": page_csp}
+            )
 
     return app
+
+
+def spa_csp(index_html: str) -> str:
+    """Content-Security-Policy for the web UI: its own scripts, plus each inline
+    script of ``index.html`` by hash (the theme is applied before first paint)."""
+    hashes = " ".join(
+        "'sha256-" + base64.b64encode(hashlib.sha256(m.encode()).digest()).decode() + "'"
+        for m in re.findall(r"<script>(.*?)</script>", index_html, flags=re.DOTALL)
+    )
+    return (
+        f"default-src 'self'; script-src 'self' {hashes}".rstrip()
+        + "; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+        "connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'none'; "
+        "form-action 'self'; frame-ancestors 'none'"
+    )
 
 
 def _attachment(filename: str) -> str:
@@ -773,7 +819,10 @@ class ObservedRequests:
             nonlocal status
             if message["type"] == "http.response.start":
                 status = message["status"]
-                message["headers"] = [*message.get("headers", []), (b"x-request-id", rid.encode())]
+                headers = list(message.get("headers", []))
+                present = {k.lower() for k, _ in headers}
+                headers += [(k, v) for k, v in SECURITY_HEADERS if k not in present]
+                message["headers"] = [*headers, (b"x-request-id", rid.encode())]
             await send(message)
 
         try:
@@ -788,13 +837,8 @@ class ObservedRequests:
                 "flightlens_http_request_duration_seconds", seconds, {"route": template}
             )
             path = scope["path"]
-            level = (
-                logging.ERROR
-                if status >= 500
-                else logging.DEBUG
-                if path in QUIET_PATHS
-                else logging.INFO
-            )
+            quiet = template in QUIET_ROUTES or path.startswith("/assets/")
+            level = logging.ERROR if status >= 500 else logging.DEBUG if quiet else logging.INFO
             http_log.log(
                 level,
                 "request",
@@ -820,10 +864,17 @@ class RequestGuard:
       oversized body is refused before anything is written to disk.
     """
 
-    def __init__(self, app: Any, allowed_hosts: tuple[str, ...], read_only: bool = False) -> None:
+    def __init__(
+        self,
+        app: Any,
+        allowed_hosts: tuple[str, ...],
+        read_only: bool = False,
+        upload_refusal: Any = None,
+    ) -> None:
         self.app = app
         self.allowed_hosts = allowed_hosts
         self.read_only = read_only
+        self.upload_refusal = upload_refusal
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] != "http":
@@ -852,6 +903,10 @@ class RequestGuard:
                 return
             if length > MAX_UPLOAD_BYTES + MULTIPART_OVERHEAD:
                 await _reject(send, 413, "The file is larger than the 1 GB limit")
+                return
+            refusal = self.upload_refusal(length) if self.upload_refusal else None
+            if refusal is not None:
+                await _reject(send, refusal[0], refusal[1], refusal[2])
                 return
             receive = _limited(receive, length)
 
@@ -882,8 +937,11 @@ def _limited(receive: Any, limit: int) -> Any:
     return wrapped
 
 
-async def _reject(send: Any, status: int, detail: str) -> None:
+async def _reject(
+    send: Any, status: int, detail: str, headers: dict[str, str] | None = None
+) -> None:
     body = json.dumps({"detail": detail}).encode()
+    extra = [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()]
     await send(
         {
             "type": "http.response.start",
@@ -891,6 +949,7 @@ async def _reject(send: Any, status: int, detail: str) -> None:
             "headers": [
                 (b"content-type", b"application/json"),
                 (b"content-length", str(len(body)).encode()),
+                *extra,
             ],
         }
     )

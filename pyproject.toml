@@ -1,6 +1,6 @@
 [project]
 name = "flightlens"
-version = "0.2.0"
+version = "1.0.0"
 description = "Automatic drone flight log analysis: a health verdict, ranked findings and the evidence behind them."
 readme = "README.md"
 license = { text = "MIT" }
@@ -8,7 +8,7 @@ requires-python = ">=3.12"
 authors = [{ name = "Naol Zewdie" }]
 keywords = ["drone", "uav", "px4", "ardupilot", "flight-log", "ulog", "dataflash", "diagnostics"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
     "Environment :: Web Environment",
     "Intended Audience :: Science/Research",
@@ -46,6 +46,7 @@ dev = [
     "playwright>=1.65.0",
     "hypothesis>=6.100",
     "pymavlink>=2.4.41",
+    "httpx2>=2.16.2",
 ]
 docs = ["mkdocs-material>=9.5"]
 

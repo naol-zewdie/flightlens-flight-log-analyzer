@@ -143,3 +143,24 @@ def run_all(flight: Flight) -> list:  # type: ignore[type-arg]
     from flightlens.engine import analyze
 
     return analyze(flight).findings
+
+
+def test_baro_rest_windows_never_reach_into_the_next_sortie(make_flight: FlightFactory) -> None:
+    """Two launches 6 s apart: a long rest window after the first must stop before the
+    second, or it measures the barometer in flight against GPS, which lags."""
+    t = np.arange(0, 80, 0.1)
+    flying = ((t >= 12) & (t < 38)) | ((t >= 44) & (t < 70))
+    alt = np.where((t >= 12) & (t < 38), 10.0, 0.0)
+    alt = np.where((t >= 44) & (t < 70), np.minimum((t - 44) * 10, 60.0), alt)
+    gps = 500 + np.interp(t - 1.5, t, alt)  # GPS altitude lags behind a fast climb
+    flight = make_flight(
+        {
+            "baro.alt": (t, alt),
+            "gps.alt": (t, gps),
+            "pos.rel_alt": (t, alt),
+            "state.landed": (t, (~flying).astype(float)),
+        },
+        segments=[(10, 75)],
+    )
+    [f] = run("baro.health", flight, rest_window_s=10)
+    assert f.severity is not Severity.PROBLEM and f.severity is not Severity.ATTENTION, f

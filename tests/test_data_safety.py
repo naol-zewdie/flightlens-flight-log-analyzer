@@ -93,6 +93,25 @@ def test_failed_migration_stops_at_the_last_complete_step(
     assert "half_done" not in tables  # rolled back, not half-applied
 
 
+def test_a_retried_upgrade_keeps_the_original_safety_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _v01_library(tmp_path)
+
+    def broken(db: sqlite3.Connection, data: Path) -> None:
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(schema, "MIGRATIONS", (*schema.MIGRATIONS[:2], (3, "broken", broken)))
+    monkeypatch.setattr(schema, "SCHEMA_VERSION", 3)
+    for _ in range(2):  # the first attempt stops at version 2; the retry fails again
+        db = sqlite3.connect(tmp_path / "flightlens.db")
+        with pytest.raises(RuntimeError):
+            schema.migrate(db, tmp_path / "flightlens.db")
+        db.close()
+    copy = sqlite3.connect(tmp_path / "flightlens.db.before-v3")
+    assert copy.execute("PRAGMA user_version").fetchone()[0] == 0  # still the original
+
+
 # --- backup and restore ----------------------------------------------------------------------
 
 
@@ -245,3 +264,65 @@ def test_prune_lists_first_and_keeps_reviewed(library: Path, tmp_path: Path) -> 
     left = store.list_flights()
     assert [f["filename"] for f in left] == ["quad-10-vibration.bin"]
     assert not any((copy / "flights" / c.id).exists() for c in chosen)
+
+
+def test_restore_refuses_crafted_paths_ids_and_sizes(
+    library: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    good = backup.create(library, tmp_path / "lib.zip").path
+
+    def backslash(name: str, data: bytes) -> tuple[str, bytes]:
+        # one harmless-looking POSIX name, but a path that escapes on Windows
+        return (r"flights\..\..\evil.txt" if name.endswith("report.json") else name), data
+
+    def manifest_id(name: str, data: bytes) -> tuple[str, bytes]:
+        if name == "manifest.json":
+            m = json.loads(data)
+            m["flights"][0]["id"] = "../../outside"
+            return name, json.dumps(m).encode()
+        return name, data
+
+    def database_id(name: str, data: bytes) -> tuple[str, bytes]:
+        if name == "flightlens.db":
+            db_file = tmp_path / "hostile.db"
+            db_file.write_bytes(data)
+            db = sqlite3.connect(db_file)
+            db.execute("PRAGMA foreign_keys = OFF")
+            db.execute("UPDATE flights SET id='../../../elsewhere' WHERE rowid=1")
+            db.commit()
+            db.close()
+            return name, db_file.read_bytes()
+        return name, data
+
+    def trigger(name: str, data: bytes) -> tuple[str, bytes]:
+        if name == "flightlens.db":
+            db_file = tmp_path / "trigger.db"
+            db_file.write_bytes(data)
+            db = sqlite3.connect(db_file)
+            db.execute(
+                "CREATE TRIGGER t AFTER UPDATE ON jobs BEGIN UPDATE flights SET filename='x'; END"
+            )
+            db.commit()
+            db.close()
+            return name, db_file.read_bytes()
+        return name, data
+
+    cases = [
+        (backslash, "unsafe path"),
+        (manifest_id, "invalid flight entry"),
+        (database_id, "invalid flight ids"),
+        (trigger, "contains a trigger"),
+    ]
+    for i, (change, message) in enumerate(cases):
+        bad = _rewrite(good, tmp_path / f"crafted{i}.zip", change)
+        target = tmp_path / f"c{i}"
+        with pytest.raises(backup.BackupError, match=message):
+            backup.restore(bad, target)
+        assert not target.exists()
+    assert not (tmp_path / "evil.txt").exists()
+
+    # a backup that would not fit on the disk is refused before anything is written
+    monkeypatch.setattr(backup, "DISK_MARGIN", 1 << 62)
+    with pytest.raises(backup.BackupError, match="GB is free"):
+        backup.restore(good, tmp_path / "full")
+    assert not (tmp_path / "full").exists()

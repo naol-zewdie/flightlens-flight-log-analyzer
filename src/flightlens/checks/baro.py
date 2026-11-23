@@ -92,13 +92,18 @@ class BaroHealth:
         fix = flight.signals.get("gps.fix")
         w = config["rest_window_s"]
         worst: tuple[float, float, float] | None = None  # drift, takeoff, landing
-        for s in summarize(flight).sorties:
+        sorties = summarize(flight).sorties
+        for k, s in enumerate(sorties):
             a, z = s["start"], s["end"]
+            # rest windows stop short of the previous and next sortie (touch-and-go,
+            # quick relaunch), so they never measure the aircraft in flight
+            before = max(a - 1 - w, sorties[k - 1]["end"] + 2 if k else -np.inf)
+            after = min(z + 2 + w, sorties[k + 1]["start"] - 1 if k + 1 < len(sorties) else np.inf)
             values = (
-                _rest(baro, a - 1 - w, a - 1),
-                _rest(baro, z + 2, z + 2 + w),
-                _rest(gps, a - 1 - w, a - 1, fix),
-                _rest(gps, z + 2, z + 2 + w, fix),
+                _rest(baro, before, a - 1),
+                _rest(baro, z + 2, after),
+                _rest(gps, before, a - 1, fix),
+                _rest(gps, z + 2, after, fix),
             )
             if any(v is None for v in values):
                 continue

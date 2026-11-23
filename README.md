@@ -4,7 +4,7 @@ FlightLens reads a drone flight log after landing and tells you whether the airc
 
 ```
 $ flightlens analyze 9c90f86e.ulg
-FlightLens 0.2.0 · PX4 v1.14.4 · Hexarotor · 22:12
+FlightLens 1.0.0 · PX4 v1.14.4 · Hexarotor · 22:12
 0.31 km · max alt 4 m · max speed 3.1 m/s · 24367 mAh used · Stabilized, Position
 Verdict: PROBLEM   (health score 10/100)
 
@@ -154,7 +154,7 @@ Drop the file in `src/flightlens/checks/`; it is discovered automatically. Add s
 ## Development
 
 ```bash
-uv run pytest                                   # 393 tests (FLIGHTLENS_SLOW=1 adds a 100 MB test)
+uv run pytest                                   # 400 tests (FLIGHTLENS_SLOW=1 adds a 100 MB test)
 uv run ruff check . && uv run ruff format --check . && uv run mypy
 cd web && npm run dev                           # UI with hot reload; run `uv run flightlens serve` alongside
 uv run python scripts/fetch_px4_logs.py --count 20   # public test logs into testdata/real/
@@ -170,6 +170,25 @@ The documentation site (built from [docs/](docs/) with MkDocs, `uv run --group d
 
 Releases are cut by pushing a tag `vX.Y.Z` that matches `pyproject.toml`: the [release workflow](.github/workflows/release.yml) tests, then publishes the wheel (with the web UI bundled) to PyPI, a `linux/amd64` + `linux/arm64` image to GHCR and a GitHub release. Build the same artifacts locally with `uv run python scripts/build_dist.py`.
 
+## Known limits
+
+- **No login.** Anyone who can reach the server can upload, change and delete
+  flights. Keep it on `localhost` or a trusted network, or put it behind a
+  reverse proxy with authentication; see [SECURITY.md](SECURITY.md).
+- **Validation.** Every check is proven on the generated fault benchmark,
+  which shows the detection logic works on faults *as modelled there*. Real
+  logs are the real test: 28 public PX4 logs, 20 ArduPilot logs and 8 PX4 SITL
+  sessions so far. The ArduPilot SITL fault campaign
+  (`scripts/sitl_campaign.py`) has not been run yet. The ESC, barometer and
+  wind checks have the least real data behind them (ESC telemetry from 5
+  public PX4 logs; no real ArduPilot ESC data).
+- **Thresholds** are community starting values, not limits approved for your
+  aircraft; use a threshold profile to set your own.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Security problems: [SECURITY.md](SECURITY.md).
+
 ## Licence
 
-MIT. Sample logs in `testdata/logs/` come from [PX4/pyulog](https://github.com/PX4/pyulog) (BSD-3-Clause).
+MIT, see [LICENSE](LICENSE). Sample logs in `testdata/logs/` come from [PX4/pyulog](https://github.com/PX4/pyulog) (BSD-3-Clause).

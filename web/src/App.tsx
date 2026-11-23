@@ -15,7 +15,7 @@ import { QualityView } from "./pages/QualityView";
 
 export function App() {
   return (
-    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <BrowserRouter>
       <TopBar />
       <Routes>
         <Route path="/" element={<Library />} />

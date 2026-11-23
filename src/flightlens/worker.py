@@ -214,6 +214,7 @@ class JobRunner:
         self._deferred: dict[str, list[str]] = {}  # flight id -> jobs waiting for it
         self._procs: dict[str, Any] = {}  # job id -> its analysis process
         self._interrupted: set[str] = set()
+        self._n_interrupted = 0  # analyses stopped by shutdown and put back in the queue
         self._stopping = threading.Event()
         self._threads: list[threading.Thread] = []
 
@@ -251,6 +252,8 @@ class JobRunner:
             proc.kill()
         for t in self._threads:
             t.join(10)
+        with self._lock:
+            interrupted = self._n_interrupted
         left = 0
         while True:
             try:
@@ -259,7 +262,7 @@ class JobRunner:
                 break
         with self._lock:
             left += sum(len(v) for v in self._deferred.values())
-        return {"interrupted": len(still), "left_queued": left}
+        return {"interrupted": interrupted, "left_queued": left}
 
     # --- state -----------------------------------------------------------------------
 
@@ -270,7 +273,9 @@ class JobRunner:
         """Jobs waiting to run."""
         with self._lock:
             deferred = sum(len(v) for v in self._deferred.values())
-        return self._queue.qsize() + deferred
+        with self._queue.mutex:  # the shutdown sentinels (None) are not jobs
+            queued = sum(item is not None for item in self._queue.queue)
+        return queued + deferred
 
     def running(self) -> int:
         with self._lock:
@@ -346,6 +351,13 @@ class JobRunner:
         child.close()
         with self._lock:
             self._procs[job_id] = proc
+            # started after stop() looked for running analyses: stop it here
+            late = self._stopping.is_set() and job_id not in self._interrupted
+            if late:
+                self._interrupted.add(job_id)
+        if late:
+            proc.kill()
+        status, payload = "crash", "The analysis was stopped"
         try:
             status, payload = self._wait(proc, parent)
             proc.join(timeout=10)
@@ -353,8 +365,11 @@ class JobRunner:
             parent.close()
             with self._lock:
                 self._procs.pop(job_id, None)
-                # also a child that died during shutdown (e.g. from the terminal's Ctrl+C)
-                interrupted = job_id in self._interrupted or self._stopping.is_set()
+                # also a child that died during shutdown (e.g. from the terminal's Ctrl+C);
+                # a real outcome (unreadable log, timeout) stays what it is
+                interrupted = job_id in self._interrupted or (
+                    self._stopping.is_set() and status == "crash"
+                )
                 self._interrupted.discard(job_id)
         seconds = round(time.monotonic() - started, 3)
 
@@ -369,6 +384,8 @@ class JobRunner:
         elif interrupted:
             self.store.set_job(job_id, "queued")  # resumed at the next start
             outcome = "interrupted"
+            with self._lock:
+                self._n_interrupted += 1
             log.warning("job interrupted by shutdown; will resume", extra={**ids})
         elif status == "timeout":
             message = f"Analysis took longer than {self.timeout_s:.0f} s and was stopped"

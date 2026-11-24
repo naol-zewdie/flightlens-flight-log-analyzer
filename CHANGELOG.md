@@ -18,7 +18,7 @@ review; backup and restore; metrics and logs for running it as a service.
 (1.0.0 was prepared but never published; its changes are part of this release.)
 
 ### Added
-- **Replay** ([docs/replay.md](docs/replay.md)): a Replay tab on every
+- **Replay** (`docs/replay.md`): a Replay tab on every
   flight. A 3D aircraft flies the logged path with the logged attitude, with
   flight instruments, a map, synced charts (follow mode) and the timeline on
   one clock; chase, orbit, top and cockpit cameras; play, speed (0.25x-16x),
@@ -35,7 +35,7 @@ review; backup and restore; metrics and logs for running it as a service.
 - `flightlens replay-info <log>`; a scripted known-manoeuvre flight
   (`flightlens.sim.manoeuvre`, demo flight `quad-12-manoeuvres.bin`) against
   which the replay is checked: exact for onboard logs, within 0.2° and 0.17 m
-  for telemetry logs (see [validation](docs/validation.md)).
+  for telemetry logs (see `docs/validation.md`).
 - Browser tests of the Replay tab (Playwright) and web unit tests (vitest),
   both in CI.
 - **ESC, barometer and wind checks** (`esc.health`, `baro.health`,

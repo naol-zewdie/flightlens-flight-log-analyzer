@@ -2,7 +2,7 @@
 // the clock's time. Everything is built in code (no model files, no textures,
 // nothing downloaded) and drawn only when something changes.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { Finding } from "../api";
@@ -99,12 +99,21 @@ export function Scene3D({ replay, clock, findings, camera }: Props) {
   const cameraMode = useRef(camera);
   const redraw = useRef<() => void>(() => {});
   const theme = useThemeVersion();
+  const [noWebGL, setNoWebGL] = useState(false);
   cameraMode.current = camera;
 
   useEffect(() => {
     const el = host.current!;
     const { meta, cols } = replay;
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+    } catch {
+      // no WebGL (no GPU, remote desktop, disabled by policy): the rest of the
+      // replay still works, so say so instead of failing the page
+      setNoWebGL(true);
+      return;
+    }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     el.appendChild(renderer.domElement);
     renderer.domElement.setAttribute("aria-hidden", "true");
@@ -347,5 +356,14 @@ export function Scene3D({ replay, clock, findings, camera }: Props) {
 
   useEffect(() => redraw.current(), [camera]);
 
-  return <div ref={host} className="scene3d" />;
+  return (
+    <div ref={host} className="scene3d">
+      {noWebGL && (
+        <div className="empty scene-fallback" role="status">
+          The 3D view needs WebGL, which this browser has turned off or cannot use (no
+          graphics acceleration). The instruments, map, charts and timeline still work.
+        </div>
+      )}
+    </div>
+  );
 }

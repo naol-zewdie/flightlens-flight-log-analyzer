@@ -71,20 +71,31 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[str, dict
     thread.join(10)
 
 
+# CI runners have no GPU, and Chrome no longer falls back to software WebGL by itself
+SOFTWARE_GL = ["--enable-unsafe-swiftshader", "--use-angle=swiftshader"]
+
+
+def _launch(p: Any, args: list[str]) -> Any:
+    last: Exception | None = None
+    for kwargs in ({}, {"channel": "msedge"}, {"channel": "chrome"}):
+        try:
+            return p.chromium.launch(args=args, **kwargs)
+        except Exception as exc:  # browser not installed
+            last = exc
+    pytest.skip(f"no browser for Playwright: {last}")
+
+
 @pytest.fixture(scope="module")
-def browser() -> Iterator[Any]:
-    with pw.sync_playwright() as p:
-        last: Exception | None = None
-        for kwargs in ({}, {"channel": "msedge"}, {"channel": "chrome"}):
-            try:
-                b = p.chromium.launch(**kwargs)
-                break
-            except Exception as exc:  # browser not installed
-                last = exc
-        else:
-            pytest.skip(f"no browser for Playwright: {last}")
-        yield b
-        b.close()
+def playwright() -> Iterator[Any]:
+    with pw.sync_playwright() as p:  # only one may run at a time
+        yield p
+
+
+@pytest.fixture(scope="module")
+def browser(playwright: Any) -> Iterator[Any]:
+    b = _launch(playwright, SOFTWARE_GL)
+    yield b
+    b.close()
 
 
 def _open(browser: Any, url: str) -> Any:
@@ -177,3 +188,23 @@ def test_theme_switch_keeps_the_replay(server: Any, browser: Any) -> None:
     assert abs(_time(page) - 60) < 0.2
     assert page.errors == []
     page.close()
+
+
+def test_without_webgl_the_rest_of_the_replay_works(server: Any, playwright: Any) -> None:
+    """A browser without WebGL gets an explanation in the 3D panel, not a broken page."""
+    base, ids = server
+    b = _launch(playwright, ["--disable-3d-apis", "--disable-gpu"])
+    page = b.new_page(viewport={"width": 1280, "height": 900})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(f"{base}/flights/{ids['manoeuvres.bin']}/replay?t=22",
+              wait_until="domcontentloaded", timeout=120_000)  # fmt: skip
+    page.wait_for_selector(".scene-fallback", timeout=120_000)
+    assert "needs WebGL" in page.locator(".scene-fallback").inner_text()
+    label = page.locator(".horizon").get_attribute("aria-label")
+    assert label == "Roll 30 degrees, pitch 0 degrees"
+    page.keyboard.press("Space")  # playback still works
+    page.wait_for_timeout(800)
+    assert _time(page) > 22.3
+    assert errors == []
+    b.close()

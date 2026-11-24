@@ -426,3 +426,4 @@ textarea.input { height: auto; padding: 8px 10px; resize: vertical; line-height:
   .replay-stage { grid-template-columns: minmax(0, 1fr); }
   .replay-scene { min-height: 300px; }
 }
+.scene-fallback { position: absolute; inset: 0; display: grid; place-items: center; padding: 48px 24px; max-width: 520px; margin: auto; }

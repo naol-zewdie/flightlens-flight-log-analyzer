@@ -24,7 +24,8 @@ review; backup and restore; metrics and logs for running it as a service.
   one clock; chase, orbit, top and cockpit cameras; play, speed (0.25x-16x),
   loop a range (shift-drag), keyboard control; "Replay from here" on every
   finding and event; `?t=` links. Works for PX4, ArduPilot and telemetry
-  logs, offline; three.js loads only when the tab is opened.
+  logs, offline; three.js loads only when the tab is opened. A browser
+  without WebGL gets an explanation in the 3D panel; the rest still works.
 - The replay is built with every analysis (`replay.parquet`, `replay.json`):
   slerp-interpolated attitude, never interpolated across gaps over 1 s;
   served as `/api/flights/{id}/replay` and `/replay.bin` (about 3 MB per hour

@@ -588,6 +588,38 @@ def checks_cmd() -> None:
     console.print(table)
 
 
+@app.command("replay-info")
+def replay_info_cmd(
+    log: Annotated[Path, typer.Argument(help="Path to a .ulg, .bin or .tlog log.")],
+) -> None:
+    """What a replay of the log would contain: duration, rate, data sources, gaps."""
+    from flightlens.replay import build_replay
+
+    flight = _load_or_exit(log)
+    meta = build_replay(flight).meta
+    src = meta["sources"]
+    origin = meta["origin"]
+    console.print(
+        f"{log.name} · {flight.metadata.vehicle_type or 'unknown vehicle'} · "
+        f"{format_time(meta['end'] - meta['start'])} at {meta['rate_hz']:g} Hz "
+        f"({meta['rows']} samples)"
+    )
+    console.print(f"  position  {src['position'] or 'none: attitude-only replay'}")
+    if origin:
+        console.print(f"  origin    {origin['chosen']} ({origin['lat']:.6f}, {origin['lon']:.6f})")
+    console.print(f"  height    {src['height'] or 'none'}")
+    console.print(f"  attitude  {src['attitude'] or 'none: a level model'}")
+    console.print(f"  motors    {meta['motors'] or 'none'}")
+    console.print(f"  modes     {', '.join(meta['modes']) or 'none'}")
+    gaps = meta["gaps"]
+    if gaps:
+        listed = ", ".join(f"{format_time(a)}-{format_time(b)}" for a, b in gaps[:5])
+        more = f" and {len(gaps) - 5} more" if len(gaps) > 5 else ""
+        console.print(f"  gaps      {len(gaps)} over {meta['max_gap_s']:g} s: {listed}{more}")
+    else:
+        console.print("  gaps      none")
+
+
 HostOpt = Annotated[str, typer.Option(help="Interface to listen on.")]
 PortOpt = Annotated[int, typer.Option(help="Port to listen on.")]
 WebOpt = Annotated[

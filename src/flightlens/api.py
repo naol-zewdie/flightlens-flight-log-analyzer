@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import gzip
 import hashlib
 import json
 import logging
@@ -23,7 +24,7 @@ from typing import Annotated, Any
 from urllib.parse import quote, urlsplit
 
 import numpy as np
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -662,6 +663,38 @@ def create_app(
         """Gyro noise spectrum (PSD per axis, throttle tracking, spectrogram), or null."""
         report_or_409(flight_id)
         return {"spectrum": store.read_spectrum(flight_id)}
+
+    def replay_or_409(flight_id: str) -> dict[str, Any]:
+        report_or_409(flight_id)
+        meta = store.read_replay_meta(flight_id)
+        if meta is None:
+            raise HTTPException(
+                409, "This flight was analyzed before Replay existed; re-analyze it to replay it"
+            )
+        return meta
+
+    @app.get("/api/flights/{flight_id}/replay")
+    def replay(flight_id: str) -> dict[str, Any]:
+        """Replay metadata: origin, rate, columns, modes, gaps, data sources.
+        The table itself is ``replay.bin``."""
+        return replay_or_409(flight_id)
+
+    @app.get("/api/flights/{flight_id}/replay.bin")
+    def replay_table(flight_id: str, request: Request) -> Response:
+        """The replay table: for each column in ``columns`` order, ``rows`` little-endian
+        float32 values (NaN = no data), gzip-compressed when the client accepts it."""
+        meta = replay_or_409(flight_id)
+        table = store.read_replay_table(flight_id)
+        if table is None:
+            raise HTTPException(409, "The replay data is missing; re-analyze the flight")
+        body = b"".join(
+            np.ascontiguousarray(table[c], dtype="<f4").tobytes() for c in meta["columns"]
+        )
+        headers = {"Cache-Control": "no-cache", "X-Replay-Rows": str(meta["rows"])}
+        if "gzip" in request.headers.get("accept-encoding", ""):
+            body = gzip.compress(body, compresslevel=6)
+            headers["Content-Encoding"] = "gzip"
+        return Response(body, media_type="application/octet-stream", headers=headers)
 
     @app.get("/api/flights/{flight_id}/track")
     def track(flight_id: str) -> dict[str, Any]:

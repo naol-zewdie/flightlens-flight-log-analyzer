@@ -20,9 +20,11 @@ def current_versions() -> dict[str, Any]:
     """Versions the running FlightLens would analyze with."""
     from flightlens.checks import all_checks
     from flightlens.parsers._mapping import load_mapping
+    from flightlens.replay import REPLAY_VERSION
 
     return {
         "checks": {c.id: c.version for c in all_checks()},
+        "artifacts": {"replay": REPLAY_VERSION},
         "mappings": {
             fmt: str(load_mapping(name)["version"]) for fmt, name in MAPPING_FOR_FORMAT.items()
         },
@@ -36,6 +38,7 @@ def versions_of(report: Mapping[str, Any]) -> dict[str, Any]:
         "checks": {c["id"]: c["version"] for c in report.get("checks") or []},
         "mapping": source.get("mapping_version"),
         "format": source.get("format"),
+        "artifacts": dict(source.get("artifacts") or {}),
     }
 
 
@@ -54,6 +57,13 @@ def stale_reasons(versions: Mapping[str, Any] | None, has_metrics: bool = True) 
             reasons.append(f"new check {check_id}")
         elif old != version:
             reasons.append(f"{check_id} {old} → {version}")
+    made = versions.get("artifacts") or {}
+    for name, version in now["artifacts"].items():
+        old = made.get(name)
+        if old is None:
+            reasons.append(f"analyzed before {name} existed")
+        elif old != version:
+            reasons.append(f"{name} {old} → {version}")
     current_mapping = now["mappings"].get(versions.get("format") or "")
     if current_mapping and versions.get("mapping") and versions["mapping"] != current_mapping:
         reasons.append(f"signal mapping {versions['mapping']} → {current_mapping}")

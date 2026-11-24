@@ -153,6 +153,7 @@ export function FlightPage() {
           <Stats report={r} />
           <nav className="tabs">
             <NavLink to="" end>Overview</NavLink>
+            <NavLink to="replay">Replay</NavLink>
             <NavLink to="signals">Signals</NavLink>
             <NavLink to="tuning">Tuning</NavLink>
             <NavLink to="spectrum">Noise spectrum</NavLink>

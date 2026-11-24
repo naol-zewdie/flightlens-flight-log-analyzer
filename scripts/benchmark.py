@@ -51,6 +51,74 @@ not fully correct, so a threshold or logic regression cannot ship.
 """
 
 
+def replay_section(folder: Path) -> str:
+    """Replay accuracy against the known-manoeuvre flight, build time and payload size."""
+    import gzip
+    import math
+    import time
+
+    import numpy as np
+
+    from flightlens import parsers
+    from flightlens.replay import build_replay
+    from flightlens.sim import manoeuvre
+    from flightlens.sim.telemetry import telemetry
+
+    known = []
+    onboard = manoeuvre.manoeuvre_log(folder / "manoeuvres.bin")
+    for path in (onboard, telemetry(parsers.load(onboard), folder / "manoeuvres.tlog")):
+        c = build_replay(parsers.load(path)).columns
+        att = pos = 0.0
+        for i in range(c["t"].size):
+            g = manoeuvre.truth(float(c["t"][i]))
+            if c["valid_att"][i]:
+                for got, want in ((c["roll"][i], g.roll), (c["pitch"][i], g.pitch),
+                                  (c["yaw"][i], g.yaw)):  # fmt: skip
+                    att = max(att, abs((float(got) - want + 180) % 360 - 180))
+            if c["valid_pos"][i] and np.isfinite(c["up"][i]):
+                here = (c["east"][i], c["north"][i], c["up"][i])
+                pos = max(pos, math.dist(here, (g.east, g.north, g.up)))
+        known.append((path.suffix, att, pos))
+
+    rows = []
+    for log in sorted(folder.glob("copter-*.bin"))[:6] + sorted(folder.glob("*.tlog"))[:2]:
+        flight = parsers.load(log)
+        t0 = time.perf_counter()
+        r = build_replay(flight)
+        seconds = time.perf_counter() - t0
+        body = b"".join(
+            np.ascontiguousarray(r.columns[c], dtype="<f4").tobytes() for c in r.meta["columns"]
+        )
+        minutes = max((r.meta["end"] - r.meta["start"]) / 60, 1e-9)
+        per_hour = len(gzip.compress(body, 6)) / 1e6 * 60 / minutes
+        rows.append((log.name, minutes, r.meta["rate_hz"], seconds, per_hour))
+
+    out = [
+        "## Replay",
+        "",
+        "Accuracy against the scripted flight in `flightlens/sim/manoeuvre.py` (a 30° roll,",
+        "a 45° pitch, a 90° turn and a 20 m square, with exact ground truth). The plan's",
+        "tolerance is 0.5° and 0.5 m.",
+        "",
+        "| Log | Worst attitude error | Worst position error |",
+        "|---|---|---|",
+    ]
+    out += [f"| `{suffix}` | {a:.3f}° | {p:.3f} m |" for suffix, a, p in known]
+    out += [
+        "",
+        "Build time and payload: the gzip-compressed table the browser downloads, scaled",
+        "to one hour of flight (budget 5 MB).",
+        "",
+        "| Log | Minutes | Rate | Build | Payload per hour |",
+        "|---|---|---|---|---|",
+    ]
+    out += [
+        f"| `{name}` | {m:.1f} | {hz:g} Hz | {sec * 1000:.0f} ms | {mb:.1f} MB |"
+        for name, m, hz, sec, mb in rows
+    ]
+    return "\n".join(out) + "\n"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--keep", type=Path, help="write the logs here instead of a temp dir")
@@ -60,12 +128,13 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         manifest = build(args.keep or Path(tmp))
         outcomes = [validate.evaluate(c) for c in validate.load_manifest(manifest)]
+        replay = replay_section(manifest.parent)
 
     body = validate.to_markdown(outcomes, "Validation benchmark")
     title, rest = body.split("\n", 1)
     date = datetime.now(UTC).date().isoformat()
     args.out.write_text(
-        f"{title}\n\n{INTRO.format(version=__version__, date=date)}{rest.lstrip()}",
+        f"{title}\n\n{INTRO.format(version=__version__, date=date)}{rest.lstrip()}\n{replay}",
         encoding="utf-8",
     )
     passed = sum(o.passed for o in outcomes)

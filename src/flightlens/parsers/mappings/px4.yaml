@@ -12,10 +12,10 @@
 #   min_valid/max_valid   values outside this range become missing (NaN)
 #   zero_is_missing       0 means "no sensor" for this field
 #
-# Signals that need computation (attitude angles from quaternions, motors,
+# Signals that need computation (attitude angles and att.q0-q3 from quaternions, motors,
 # vibration across IMUs, arming segments, events) are built in ulog.py.
 
-version: "px4-2026.11.5"
+version: "px4-2026.11.6"
 
 signals:
   # Battery

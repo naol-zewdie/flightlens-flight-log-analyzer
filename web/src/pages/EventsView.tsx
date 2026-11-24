@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import type { FlightEvent } from "../api";
 import { SevIcon } from "../components/Severity";
 import { fmtTime } from "../format";
@@ -21,7 +22,7 @@ const KIND: Record<FlightEvent["kind"], string> = {
 };
 
 export function EventsView() {
-  const { events, cursor, setCursor } = useFlight();
+  const { flight, events, cursor, setCursor } = useFlight();
   const [f, setF] = useState(0);
   const shown = events.filter(FILTERS[f].match);
   return (
@@ -44,6 +45,7 @@ export function EventsView() {
               <th>Type</th>
               <th>Event</th>
               <th>Source</th>
+              <th><span className="sr-only">Replay</span></th>
             </tr>
           </thead>
           <tbody>
@@ -65,12 +67,18 @@ export function EventsView() {
                   </td>
                   <td>{e.text}</td>
                   <td className="cell-sub mono">{e.source}</td>
+                  <td className="r">
+                    <Link className="replay-link" to={`/flights/${flight.id}/replay?t=${Math.max(0, e.t - 5).toFixed(1)}`}
+                      onClick={(ev) => ev.stopPropagation()} title="Open the replay 5 s before this event">
+                      Replay
+                    </Link>
+                  </td>
                 </tr>
               );
             })}
             {shown.length === 0 && (
               <tr>
-                <td colSpan={4} className="empty">No events of this type.</td>
+                <td colSpan={5} className="empty">No events of this type.</td>
               </tr>
             )}
           </tbody>

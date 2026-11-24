@@ -8,6 +8,11 @@ interface Props {
   findings: Finding[];
   cursor: number | null;
   onPick: (t: number) => void;
+  /** Looped range (replay); shift-drag selects it */
+  loop?: [number, number] | null;
+  onLoop?: (range: [number, number] | null) => void;
+  /** Ranges with no data, drawn as hatched gaps */
+  gaps?: [number, number][];
 }
 
 const TICK: Partial<Record<FlightEvent["kind"], string>> = {
@@ -19,8 +24,9 @@ const TICK: Partial<Record<FlightEvent["kind"], string>> = {
 
 /** Mode bands, event ticks and finding windows on one strip. Click or drag
  *  to move the shared time cursor; arrow keys step 1 s (Shift: 10 s). */
-export function Timeline({ duration, events, findings, cursor, onPick }: Props) {
+export function Timeline({ duration, events, findings, cursor, onPick, loop, onLoop, gaps }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const loopFrom = useRef<number | null>(null);
   const D = Math.max(duration, 1);
   const pct = (t: number) => `${Math.min(100, Math.max(0, (t / D) * 100))}%`;
 
@@ -49,10 +55,23 @@ export function Timeline({ duration, events, findings, cursor, onPick }: Props) 
       aria-valuetext={fmtTime(cursor ?? 0)}
       onPointerDown={(e) => {
         e.currentTarget.setPointerCapture(e.pointerId);
+        if (e.shiftKey && onLoop) {
+          loopFrom.current = timeAt(e.clientX);
+          onLoop(null);
+          return;
+        }
+        loopFrom.current = null;
         onPick(timeAt(e.clientX));
       }}
       onPointerMove={(e) => {
-        if (e.buttons === 1) onPick(timeAt(e.clientX));
+        if (e.buttons !== 1) return;
+        if (loopFrom.current != null && onLoop) {
+          const t = timeAt(e.clientX);
+          onLoop([Math.min(loopFrom.current, t), Math.max(loopFrom.current, t)]);
+        } else onPick(timeAt(e.clientX));
+      }}
+      onPointerUp={() => {
+        loopFrom.current = null;
       }}
       onKeyDown={(e) => {
         const step = e.shiftKey ? 10 : 1;
@@ -91,6 +110,14 @@ export function Timeline({ duration, events, findings, cursor, onPick }: Props) 
         .map((e, i) => (
           <div key={`e${i}`} className="tick" title={`${fmtTime(e.t)} · ${e.text}`} style={{ left: pct(e.t), background: TICK[e.kind] }} />
         ))}
+      {(gaps ?? []).map(([a, b], i) => (
+        <div key={`g${i}`} className="gap" title={`No data ${fmtTime(a)}–${fmtTime(b)}`}
+          style={{ left: pct(a), width: `max(2px, calc(${pct(b)} - ${pct(a)}))` }} />
+      ))}
+      {loop && (
+        <div className="loop" title={`Looping ${fmtTime(loop[0])}–${fmtTime(loop[1])}`}
+          style={{ left: pct(loop[0]), width: `calc(${pct(loop[1])} - ${pct(loop[0])})` }} />
+      )}
       {cursor != null && <div className="cursor" style={{ left: pct(cursor) }} />}
       <div className="axis num">
         {[0, 0.25, 0.5, 0.75, 1].map((f) => (

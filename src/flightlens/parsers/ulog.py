@@ -317,6 +317,10 @@ def _attitude(topics: dict[TopicKey, TopicData], add: Any) -> None:
         q = [d[f"q[{i}]"].astype(np.float64) for i in range(4)]
         for axis, vals in zip(("roll", "pitch", "yaw"), _quat_to_euler(*q), strict=True):
             add(f"att.{axis}", "deg", key, vals, "vehicle_attitude[0].q")
+        # the quaternion itself (body to NED, Hamilton w, x, y, z), for replay:
+        # it interpolates without gimbal lock or heading wrap
+        for i, vals in enumerate(q):
+            add(f"att.q{i}", "", key, vals, f"vehicle_attitude[0].q[{i}]")
 
     key = ("vehicle_attitude_setpoint", 0)
     d = topics.get(key)

@@ -79,6 +79,7 @@ def process_log(
     from flightlens.metrics import flight_metrics
     from flightlens.model import Severity
     from flightlens.provenance import versions_of
+    from flightlens.replay import REPLAY_VERSION, build_replay
     from flightlens.spectrum import analyze_spectrum
     from flightlens.tuning import analyze_tuning
 
@@ -94,6 +95,7 @@ def process_log(
     write_signals(tmp / "signals", flight.signals)
 
     data = report.to_dict()
+    data["source"]["artifacts"] = {"replay": REPLAY_VERSION}
     data["signals"] = [
         {
             "name": s.name,
@@ -117,6 +119,7 @@ def process_log(
         (tmp / "tuning.json").write_text(
             json.dumps(_clean(tuning.to_dict()), allow_nan=False), encoding="utf-8"
         )
+    build_replay(flight).write(tmp)  # replay.parquet + replay.json, for the Replay tab
     spec = analyze_spectrum(flight)
     if spec is not None:
         (tmp / "spectrum.json").write_text(

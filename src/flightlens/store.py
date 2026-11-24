@@ -495,6 +495,18 @@ class Store:
         data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
         return data
 
+    def read_replay_meta(self, flight_id: str) -> dict[str, Any] | None:
+        path = self.flight_dir(flight_id) / "analysis" / "replay.json"
+        if not path.exists():
+            return None
+        data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        return data
+
+    def read_replay_table(self, flight_id: str) -> dict[str, np.ndarray] | None:
+        from flightlens.replay import read_columns
+
+        return read_columns(self.flight_dir(flight_id) / "analysis")
+
     def read_signal(self, flight_id: str, name: str) -> tuple[np.ndarray, np.ndarray] | None:
         path = self.flight_dir(flight_id) / "analysis" / "signals" / f"{safe_name(name)}.parquet"
         if not path.exists():

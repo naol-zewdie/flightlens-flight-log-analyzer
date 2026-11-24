@@ -30,7 +30,7 @@ Verdict: PROBLEM   (health score 10/100)
 
 ```bash
 pip install flightlens            # once released; from source: see below
-flightlens demo                   # nine example flights at http://localhost:8000
+flightlens demo                   # example flights at http://localhost:8000
 ```
 
 **With Docker**:
@@ -56,6 +56,7 @@ uv run flightlens serve          # http://localhost:8000, data in ./data
 | `flightlens analyze <log> [--json out.json] [--html out.html]` | Prints the verdict and findings; `--html` writes a self-contained report (print it to save a PDF) |
 | `flightlens batch <folder> [--csv out.csv]` | Analyzes every log in a folder and summarizes the results |
 | `flightlens signals <log>` | Lists every signal found, with its source topic and rate |
+| `flightlens replay-info flight.ulg` | What a replay of the log contains: rate, data sources, gaps |
 | `flightlens serve [--workers N] [--log-format json]` | Starts the web app and API; health at `/api/health`, Prometheus metrics at `/metrics` |
 | `flightlens demo [--read-only]` | Generates example flights with known faults and opens them in the web app |
 | `flightlens checks` | Lists the checks, their signals and default thresholds |
@@ -124,6 +125,7 @@ The benchmark runs in CI, so a threshold or logic regression fails the build. It
 - **Telemetry logs** (`.tlog`) are what the ground station received over the radio, usually at 1-10 Hz with dropouts: the checks that work on such data run (vibration, battery, GPS, estimator, failsafes, crash, arming...), the ones that need the onboard log's high-rate data (noise spectrum, rate-loop tuning) say so. FlightLens decodes MAVLink itself; its message definitions are tested against pymavlink.
 - **Common data model** ([model.py](src/flightlens/model.py)): signals named in one vocabulary (`vibe.metric`, `bat.volt`, …), events, parameters, armed segments and data-quality issues. Firmware-specific names live only in [mappings/px4.yaml](src/flightlens/parsers/mappings/px4.yaml) and [mappings/ardupilot.yaml](src/flightlens/parsers/mappings/ardupilot.yaml).
 - **Honest results:** a check without data is *not evaluated*, never OK. A flight is called *healthy* only if at least 3 checks actually ran and it was armed for at least 10 s; otherwise the verdict is *insufficient data*.
+- **Replay:** every analyzed flight plays back in 3D with flight instruments, a map and synced charts on one clock; every finding has "Replay from here" ([docs/replay.md](docs/replay.md)).
 - **Isolation:** the web server parses each upload in a separate process with a time limit, so a broken file cannot take it down.
 - **Operations:** a health check that Docker uses, Prometheus metrics, JSON logs with request ids, parallel analysis (`--workers`), and a graceful shutdown: running analyses get time to finish, and anything unfinished resumes at the next start instead of being lost.
 - **Traceability:** reports record the FlightLens version, each check's version, the mapping version, the threshold profile and the log's SHA-256. Original files are kept unchanged. After an upgrade, flights analyzed by an older check or mapping are marked *outdated*, with the reason, and can be re-analyzed in one click.
@@ -154,7 +156,7 @@ Drop the file in `src/flightlens/checks/`; it is discovered automatically. Add s
 ## Development
 
 ```bash
-uv run pytest                                   # 400 tests (FLIGHTLENS_SLOW=1 adds a 100 MB test)
+uv run pytest                                   # 429 tests (FLIGHTLENS_SLOW=1 adds a 100 MB test)
 uv run ruff check . && uv run ruff format --check . && uv run mypy
 cd web && npm run dev                           # UI with hot reload; run `uv run flightlens serve` alongside
 uv run python scripts/fetch_px4_logs.py --count 20   # public test logs into testdata/real/

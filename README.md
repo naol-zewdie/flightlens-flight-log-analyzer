@@ -4,7 +4,7 @@ FlightLens reads a drone flight log after landing and tells you whether the airc
 
 ```
 $ flightlens analyze 9c90f86e.ulg
-FlightLens 1.0.0 · PX4 v1.14.4 · Hexarotor · 22:12
+FlightLens 1.1.0 · PX4 v1.14.4 · Hexarotor · 22:12
 0.31 km · max alt 4 m · max speed 3.1 m/s · 24367 mAh used · Stabilized, Position
 Verdict: PROBLEM   (health score 10/100)
 

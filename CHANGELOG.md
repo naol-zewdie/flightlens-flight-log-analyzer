@@ -6,7 +6,16 @@ All notable changes to FlightLens. The format follows
 `flightlens checks` and stored in every report) changes whenever its logic or
 thresholds do.
 
-## [1.1.0] - unreleased
+## [1.1.0] - 2026-11-24
+
+The first public release. FlightLens reads PX4 `.ulg`, ArduPilot `.bin` and
+MAVLink `.tlog` logs and gives a health verdict, ranked findings and the
+evidence behind them, from the command line, a local web app or Docker, and
+replays every flight in 3D with flight instruments and synced charts.
+25 checks, validated on real public logs and a 54-log fault benchmark;
+per-aircraft trends and threshold profiles; printable reports; engineer
+review; backup and restore; metrics and logs for running it as a service.
+(1.0.0 was prepared but never published; its changes are part of this release.)
 
 ### Added
 - **Replay** ([docs/replay.md](docs/replay.md)): a Replay tab on every
@@ -28,27 +37,6 @@ thresholds do.
   for telemetry logs (see [validation](docs/validation.md)).
 - Browser tests of the Replay tab (Playwright) and web unit tests (vitest),
   both in CI.
-
-## [1.0.0] - unreleased
-
-The first public release. FlightLens reads PX4 `.ulg`, ArduPilot `.bin` and
-MAVLink `.tlog` logs and gives a health verdict, ranked findings and the
-evidence behind them, from the command line, a local web app or Docker.
-25 checks, validated on real public logs and a 54-log fault benchmark;
-per-aircraft trends and threshold profiles; printable reports; engineer
-review; backup and restore; metrics and logs for running it as a service.
-
-### Security
-- Restore refuses crafted backups: archive names with backslashes (a path
-  escape on Windows), invalid flight ids in the manifest or database, database
-  triggers or views, and backups larger than the free disk space.
-- Every response carries `X-Content-Type-Options`, `Referrer-Policy` and
-  `X-Frame-Options`; the web UI has a Content-Security-Policy (inline scripts
-  allowed only by hash). `serve` warns when it listens beyond this computer.
-- Uploads are refused (queue full, low disk) before their body is read.
-- react-router 7.18.6 (moderate advisories in 6.x).
-
-### Added
 - **ESC, barometer and wind checks** (`esc.health`, `baro.health`,
   `wind.speed`) with new signals `esc.N.rpm/temp/curr`, `baro.alt`,
   `baro.alt2`, `wind.n/e` and `airspeed` (mappings `px4-2026.11.5`,
@@ -172,6 +160,14 @@ review; backup and restore; metrics and logs for running it as a service.
   definition is damaged (wrong column types, no timestamp) are skipped.
 
 ### Security
+- Restore refuses crafted backups: archive names with backslashes (a path
+  escape on Windows), invalid flight ids in the manifest or database, database
+  triggers or views, and backups larger than the free disk space.
+- Every response carries `X-Content-Type-Options`, `Referrer-Policy` and
+  `X-Frame-Options`; the web UI has a Content-Security-Policy (inline scripts
+  allowed only by hash). `serve` warns when it listens beyond this computer.
+- Uploads are refused (queue full, low disk) before their body is read.
+- react-router 7.18.6 (moderate advisories in 6.x).
 - Parsers are fuzzed in CI (Hypothesis, `tests/test_fuzz.py`) and weekly with a
   long mutation campaign (`scripts/fuzz.py`).
 - CI audits the Python runtime dependencies (pip-audit) and the web UI's bundled

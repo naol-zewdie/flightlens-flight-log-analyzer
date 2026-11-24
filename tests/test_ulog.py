@@ -101,3 +101,15 @@ def test_mapping_file_is_well_formed() -> None:
         assert spec["sources"], spec["name"]
         for src in spec["sources"]:
             assert {"topic", "field"} <= set(src), spec["name"]
+
+
+def test_attitude_quaternion_agrees_with_euler_angles() -> None:
+    flight = parsers.load(V113)
+    q = [flight.signal(f"att.q{i}") for i in range(4)]
+    assert all(s.t.shape == q[0].t.shape for s in q)
+    roll, pitch, yaw = _quat_to_euler(*(s.values for s in q))
+    assert np.allclose(roll, flight.signal("att.roll").values)
+    assert np.allclose(pitch, flight.signal("att.pitch").values)
+    assert np.allclose(yaw, flight.signal("att.yaw").values)
+    norms = np.sqrt(sum(s.values**2 for s in q))
+    assert np.allclose(norms, 1.0, atol=1e-3)

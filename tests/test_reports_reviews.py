@@ -32,7 +32,12 @@ HEALTHY = "quad-01-healthy.bin"
 
 def _current(fmt: str = "dataflash") -> dict[str, Any]:
     now = current_versions()
-    return {"checks": dict(now["checks"]), "mapping": now["mappings"][fmt], "format": fmt}
+    return {
+        "checks": dict(now["checks"]),
+        "mapping": now["mappings"][fmt],
+        "format": fmt,
+        "artifacts": dict(now["artifacts"]),
+    }
 
 
 def test_current_analysis_is_not_stale() -> None:

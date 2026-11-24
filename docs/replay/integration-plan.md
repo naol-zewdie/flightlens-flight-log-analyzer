@@ -131,10 +131,10 @@ frontend tasks.
 - [x] **Frame and attitude core.** `replay.py` (*new*): `local_frame(lat, lon, alt, origin)`, `euler_to_quat`, `slerp`, `unwrap_yaw`. *Accept:* `tests/test_replay_frame.py`: points 100 m east and north land within 0.1 m; `tests/test_replay_attitude.py`: level, 30° roll, 45° pitch, 90° yaw round-trip, and slerp halfway between known attitudes.
 - [x] **Resampling.** `replay.build_replay(flight) -> (table, meta)`: uniform grid, linear for position and speeds, slerp for attitude, no interpolation across gaps over 1 s, `valid_*` flags, origin from `summary.summarize(flight).sorties`. *Accept:* `tests/test_replay_resample.py` (hypothesis): times uniform and inside the log; never bridges a gap over 1 s; yaw 359° → 1° never passes 180°.
 - [x] **Known-manoeuvre flight.** `flightlens.sim` gains a scripted flight with exact ground truth: a 30° roll held 5 s, a 45° pitch, a 90° yaw turn and a 20 m square at 15 m, written as ArduPilot `.bin` (Euler) and telemetry `.tlog`. *Accept:* `tests/test_replay_known.py`: the built replay matches the script within 0.5° and 0.5 m at every sample, for both formats.
-- [ ] **Worker and provenance.** `worker.process_log`: write `replay.parquet` and `replay.json` in `analysis.tmp`, with `source.artifacts.replay`; `provenance.versions_of` and `stale_reasons` handle it. *Accept:* `tests/test_replay_formats.py`: a PX4 sample, a generated ArduPilot log (`flightlens.sim.benchmark.copter`) and a tlog (`flightlens.sim.telemetry`) all produce a replay; a log without position gives attitude-only metadata; an old report shows "replay missing" as outdated.
-- [ ] **API.** `store.read_replay()`; `GET /api/flights/{id}/replay` returns `replay.json` plus the table as columnar JSON (Arrow IPC only if the budget in section 8 demands it). *Accept:* `tests/test_api_replay.py`: 409 before analysis, 200 after; payload within budget for a 1-hour flight.
-- [ ] **CLI.** `flightlens replay-info <log>` prints coverage (duration, rate, position and attitude source, gaps). *Accept:* a test in `tests/test_cli.py`.
-- [ ] **Benchmark.** `scripts/benchmark.py` reports replay build time and payload size. *Accept:* numbers in `docs/validation.md`.
+- [x] **Worker and provenance.** `worker.process_log`: write `replay.parquet` and `replay.json` in `analysis.tmp`, with `source.artifacts.replay`; `provenance.versions_of` and `stale_reasons` handle it. *Accept:* `tests/test_replay_formats.py`: a PX4 sample, a generated ArduPilot log (`flightlens.sim.benchmark.copter`) and a tlog (`flightlens.sim.telemetry`) all produce a replay; a log without position gives attitude-only metadata; an old report shows "replay missing" as outdated.
+- [x] **API.** `store.read_replay()`; `GET /api/flights/{id}/replay` returns `replay.json` plus the table as columnar JSON (Arrow IPC only if the budget in section 8 demands it). *Accept:* `tests/test_api_replay.py`: 409 before analysis, 200 after; payload within budget for a 1-hour flight.
+- [x] **CLI.** `flightlens replay-info <log>` prints coverage (duration, rate, position and attitude source, gaps). *Accept:* a test in `tests/test_cli.py`.
+- [x] **Benchmark.** `scripts/benchmark.py` reports replay build time and payload size. *Accept:* numbers in `docs/validation.md`.
 - [ ] **Playback clock.** `web/src/components/clock.ts` (*new*): time, playing, rate 0.25×–16×, loop range; one `requestAnimationFrame` loop; subscribed with `useSyncExternalStore`; pushes `FlightCtx.setCursor` at most about 10 Hz. Add vitest. *Accept:* vitest tests for rate, loop, end and the throttle.
 - [ ] **Timeline controls.** `components/Timeline.tsx`: play/pause, speed, keyboard (space, J/K/L, arrows with Shift, `,`/`.`, Home/End), shift-drag loop range. *Accept:* existing timeline behaviour unchanged; new keys covered by e2e.
 - [ ] **3D scene.** `components/Scene3D.tsx` (*new*), with `three` and `@types/three` pinned: ENU → three.js axes in one tested function; ground grid with scale labels; take-off marker; path in one `BufferGeometry` with the flown part highlighted; finding windows coloured by severity; shadow line to the ground; aircraft meshes built in code per vehicle type (quad, hexa, octo, fixed wing, VTOL); chase, orbit, top-down and cockpit cameras; render only on change. *Accept:* vitest for the axis conversion; attitude-only view when there is no position.
@@ -346,6 +346,10 @@ video offset, so they get the most tests.
 
 - 2026-11-23: plan created from the design document and checked against
   `main` at `11a223c`.
+- 2026-11-24: the replay table is served as `GET /api/flights/{id}/replay.bin`
+  (gzip-compressed float32 columns, decoded with `Float32Array`) next to the
+  JSON metadata at `/replay`: columnar JSON would be several times the 5 MB
+  budget for a 1-hour flight; the binary table is about 3 MB.
 - 2026-11-23: SITL is no longer required. Known-outcome checks use a
   generated known-manoeuvre flight (exact ground truth) and a generated sync
   video; SITL stays as optional extra validation.

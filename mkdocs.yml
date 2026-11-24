@@ -12,6 +12,8 @@ nav:
       - Real logs: real-log-results.md
       - Labelled log library: sitl-log-library.md
   - Writing a check: writing-a-check.md
+  - Replay & Debrief:
+      - Integration plan: replay/integration-plan.md
   - Changelog: changelog.md
 theme:
   name: material

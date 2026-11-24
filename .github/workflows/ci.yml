@@ -37,7 +37,26 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      - run: npm test
       - run: npm run build
+
+  e2e:
+    # The Replay tab in a real browser (tests/test_e2e_replay.py).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: cd web && npm ci && npm run build
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - run: uv sync
+      - run: uv run playwright install --with-deps chromium
+      - run: uv run pytest tests/test_e2e_replay.py
 
   audit:
     # Known vulnerabilities in what FlightLens ships: the Python runtime

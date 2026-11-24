@@ -135,24 +135,25 @@ frontend tasks.
 - [x] **API.** `store.read_replay()`; `GET /api/flights/{id}/replay` returns `replay.json` plus the table as columnar JSON (Arrow IPC only if the budget in section 8 demands it). *Accept:* `tests/test_api_replay.py`: 409 before analysis, 200 after; payload within budget for a 1-hour flight.
 - [x] **CLI.** `flightlens replay-info <log>` prints coverage (duration, rate, position and attitude source, gaps). *Accept:* a test in `tests/test_cli.py`.
 - [x] **Benchmark.** `scripts/benchmark.py` reports replay build time and payload size. *Accept:* numbers in `docs/validation.md`.
-- [ ] **Playback clock.** `web/src/components/clock.ts` (*new*): time, playing, rate 0.25×–16×, loop range; one `requestAnimationFrame` loop; subscribed with `useSyncExternalStore`; pushes `FlightCtx.setCursor` at most about 10 Hz. Add vitest. *Accept:* vitest tests for rate, loop, end and the throttle.
-- [ ] **Timeline controls.** `components/Timeline.tsx`: play/pause, speed, keyboard (space, J/K/L, arrows with Shift, `,`/`.`, Home/End), shift-drag loop range. *Accept:* existing timeline behaviour unchanged; new keys covered by e2e.
-- [ ] **3D scene.** `components/Scene3D.tsx` (*new*), with `three` and `@types/three` pinned: ENU → three.js axes in one tested function; ground grid with scale labels; take-off marker; path in one `BufferGeometry` with the flown part highlighted; finding windows coloured by severity; shadow line to the ground; aircraft meshes built in code per vehicle type (quad, hexa, octo, fixed wing, VTOL); chase, orbit, top-down and cockpit cameras; render only on change. *Accept:* vitest for the axis conversion; attitude-only view when there is no position.
-- [ ] **HUD.** `components/Hud.tsx` (*new*), SVG and theme-aware: horizon, heading tape, altitude and speed tapes (airspeed when present), climb, mode, battery, GPS, armed state; a dash for missing values. *Accept:* screenshot tests at level, 30° bank and inverted.
-- [ ] **Mini-map and charts.** `TrackView.tsx`: optional origin prop and heading arrow (the mini-map uses `replay.json`'s origin); `Chart.tsx`: follow mode. *Accept:* existing Overview and Signals unchanged.
-- [ ] **Replay view.** `pages/ReplayView.tsx` (*new*): the grid layout from the design with hideable panels; `?t=` opens at a time; lazy route in `App.tsx`; Replay tab in `FlightPage.tsx`; "Replay from here" on findings (`Overview.tsx`) and events (`EventsView.tsx`), a few seconds before. *Accept:* the main bundle does not grow (three.js in its own chunk).
-- [ ] **E2E.** `tests/test_e2e_replay.py` (*new*, Python Playwright): open Replay on a demo flight; play advances time; space pauses; a finding link jumps to its start minus the lead time; `?t=` opens at the right time; theme switch; read-only mode. CI installs Chromium. *Accept:* green in CI.
-- [ ] **Docs and demo.** Demo flights replay well (`demo.py`); README feature list and screenshots; CHANGELOG `[1.1.0]`.
+- [x] **Playback clock.** `web/src/components/clock.ts` (*new*): time, playing, rate 0.25×–16×, loop range; one `requestAnimationFrame` loop; subscribed with `useSyncExternalStore`; pushes `FlightCtx.setCursor` at most about 10 Hz. Add vitest. *Accept:* vitest tests for rate, loop, end and the throttle.
+- [x] **Timeline controls.** `components/Timeline.tsx`: play/pause, speed, keyboard (space, J/K/L, arrows with Shift, `,`/`.`, Home/End), shift-drag loop range. *Accept:* existing timeline behaviour unchanged; new keys covered by e2e.
+- [x] **3D scene.** `components/Scene3D.tsx` (*new*), with `three` and `@types/three` pinned: ENU → three.js axes in one tested function; ground grid with scale labels; take-off marker; path in one `BufferGeometry` with the flown part highlighted; finding windows coloured by severity; shadow line to the ground; aircraft meshes built in code per vehicle type (quad, hexa, octo, fixed wing, VTOL); chase, orbit, top-down and cockpit cameras; render only on change. *Accept:* vitest for the axis conversion; attitude-only view when there is no position.
+- [x] **HUD.** `components/Hud.tsx` (*new*), SVG and theme-aware: horizon, heading tape, altitude and speed tapes (airspeed when present), climb, mode, battery, GPS, armed state; a dash for missing values. *Accept:* screenshot tests at level, 30° bank and inverted.
+- [x] **Mini-map and charts.** `TrackView.tsx`: optional origin prop and heading arrow (the mini-map uses `replay.json`'s origin); `Chart.tsx`: follow mode. *Accept:* existing Overview and Signals unchanged.
+- [x] **Replay view.** `pages/ReplayView.tsx` (*new*): the grid layout from the design with hideable panels; `?t=` opens at a time; lazy route in `App.tsx`; Replay tab in `FlightPage.tsx`; "Replay from here" on findings (`Overview.tsx`) and events (`EventsView.tsx`), a few seconds before. *Accept:* the main bundle does not grow (three.js in its own chunk).
+- [x] **E2E.** `tests/test_e2e_replay.py` (*new*, Python Playwright): open Replay on a demo flight; play advances time; space pauses; a finding link jumps to its start minus the lead time; `?t=` opens at the right time; theme switch; read-only mode. CI installs Chromium. *Accept:* green in CI.
+- [x] **Docs and demo.** Demo flights replay well (`demo.py`); README feature list and screenshots; CHANGELOG `[1.1.0]`.
 
 **Gate 1.1:**
 
-- [ ] a replay artifact for every analyzed flight; older flights marked outdated
-- [ ] `att.q0..q3` for PX4; quaternions derived for ArduPilot and tlog
-- [ ] Replay tab with 3D, HUD, mini-map, synced charts, play controls, keyboard shortcuts, `?t=` links, "Replay from here"
-- [ ] offline, both themes, read-only; CSP unchanged
-- [ ] frame, attitude, resampling and e2e tests pass
-- [ ] performance budget met; main bundle unchanged
-- [ ] full suite, benchmark, and `flightlens validate private-logs` (92 of 92) still pass; tag `v1.1.0`
+- [x] a replay artifact for every analyzed flight; older flights marked outdated
+- [x] `att.q0..q3` for PX4; quaternions derived for ArduPilot and tlog
+- [x] Replay tab with 3D, HUD, mini-map, synced charts, play controls, keyboard shortcuts, `?t=` links, "Replay from here"
+- [x] offline, both themes, read-only; CSP unchanged
+- [x] frame, attitude, resampling and e2e tests pass
+- [x] performance budget met; three.js only in the lazy chunk (main bundle +2.6 kB for the tab, links and timeline)
+- [x] full suite, benchmark, and `flightlens validate private-logs` (92 of 92) still pass
+- [ ] tag `v1.1.0` (after 1.0.0 is released and this branch is merged)
 
 ### 1.2 Video (branch `feature/video`)
 
@@ -350,6 +351,13 @@ video offset, so they get the most tests.
   (gzip-compressed float32 columns, decoded with `Float32Array`) next to the
   JSON metadata at `/replay`: columnar JSON would be several times the 5 MB
   budget for a 1-hour flight; the binary table is about 3 MB.
+- 2026-11-24 (1.1 build): HUD screenshots are checked by eye at fixed
+  attitudes, and the attitude the HUD shows is asserted in the e2e tests
+  (`aria-label` of the horizon); pixel-baseline images were left out as too
+  fragile across operating systems. The top camera is orthographic (no
+  perspective), like the map. The main bundle grew 2.6 kB (0.8%) for the
+  tab, links and timeline features; three.js is in the lazy chunk. A WebGL
+  context loss (GPU reset) redraws the scene when restored.
 - 2026-11-23: SITL is no longer required. Known-outcome checks use a
   generated known-manoeuvre flight (exact ground truth) and a generated sync
   video; SITL stays as optional extra validation.

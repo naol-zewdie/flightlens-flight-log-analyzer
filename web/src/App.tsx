@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom";
 import { useReadOnly } from "./components/server";
 import { getThemeChoice, setThemeChoice, type ThemeChoice } from "./components/theme";
@@ -13,6 +13,9 @@ import { TuningView } from "./pages/TuningView";
 import { EventsView } from "./pages/EventsView";
 import { QualityView } from "./pages/QualityView";
 
+// three.js only downloads when someone opens a replay
+const ReplayView = lazy(() => import("./replay/ReplayView"));
+
 export function App() {
   return (
     <BrowserRouter>
@@ -24,6 +27,7 @@ export function App() {
         <Route path="/compare" element={<Compare />} />
         <Route path="/flights/:id" element={<FlightPage />}>
           <Route index element={<Overview />} />
+          <Route path="replay" element={<Suspense fallback={<div className="empty">Loading the replay…</div>}><ReplayView /></Suspense>} />
           <Route path="signals" element={<SignalsView />} />
           <Route path="tuning" element={<TuningView />} />
           <Route path="spectrum" element={<SpectrumView />} />

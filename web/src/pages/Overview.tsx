@@ -93,6 +93,15 @@ export function Overview() {
                     {f.severity === "problem" ? "Problem" : f.severity === "attention" ? "Attention" : "Check error"}
                     {f.start != null && <span className="num"> · {fmtWindow(f.start, f.end)}</span>}
                     {f.review && <span className="review-tag"> · {REVIEW_LABEL[f.review.status]}</span>}
+                    {f.start != null && (
+                      <>
+                        {" · "}
+                        <Link className="replay-link" to={`/flights/${flight.id}/replay?t=${Math.max(0, f.start - 5).toFixed(1)}`}
+                          onClick={(e) => e.stopPropagation()} title="Open the replay 5 s before this finding">
+                          Replay from here
+                        </Link>
+                      </>
+                    )}
                     {f.measured != null && (
                       <span className="num">
                         {" "}· {fmtNum(f.measured)} {f.unit}

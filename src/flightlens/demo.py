@@ -6,7 +6,9 @@ demo`` opens on a populated library and aircraft page:
 
 - a quadcopter: four healthy flights (its baseline), then one known fault per
   flight, a day apart;
-- a fixed-wing: a healthy flight, then out of trim, a hard landing and a crash.
+- a fixed-wing: a healthy flight, then out of trim, a hard landing and a crash;
+- a scripted manoeuvre flight (a 30° roll, a 45° pitch, a 90° turn and a 20 m
+  square) that shows the Replay tab at its best.
 
 Seeding twice is harmless: identical logs are recognised as duplicates.
 """
@@ -20,6 +22,7 @@ from pathlib import Path
 
 from flightlens import parsers
 from flightlens.sim.benchmark import Fault, _as_tlog, copter
+from flightlens.sim.manoeuvre import manoeuvre_log
 from flightlens.sim.plane import plane_log
 from flightlens.store import Store
 from flightlens.worker import process_log
@@ -50,6 +53,7 @@ DEMO: dict[str, Maker] = {
     "plane-02-out-of-trim.bin": lambda p: plane_log(p, "smooth", trim=-0.2, day=2),
     "plane-03-hard-landing.bin": lambda p: plane_log(p, "hard", day=4),
     "plane-04-crash.bin": lambda p: plane_log(p, "crash", trim=-0.2, day=6),
+    "quad-12-manoeuvres.bin": manoeuvre_log,
 }
 
 

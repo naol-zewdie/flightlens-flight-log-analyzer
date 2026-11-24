@@ -9,16 +9,21 @@ interface Props {
   marker: number | null;
   window?: { start: number; end: number; color: string } | null;
   onPick?: (t: number) => void;
+  /** Frame origin (the replay's take-off point); default: the first point */
+  origin?: { lat: number; lon: number } | null;
+  /** Heading at the marker, degrees from north: draws an arrow */
+  heading?: number | null;
+  compact?: boolean;
 }
 
 /** Flight path in local metres (east/north of the take-off point) on a scale
  *  grid. Works fully offline; north is up and both axes share one scale. */
-export function TrackView({ track, marker, window: win, onPick }: Props) {
+export function TrackView({ track, marker, window: win, onPick, origin, heading, compact }: Props) {
   const geo = useMemo(() => {
     const n = track.lat.length;
     if (n < 2) return null;
-    const lat0 = track.lat[0];
-    const lon0 = track.lon[0];
+    const lat0 = origin?.lat ?? track.lat[0];
+    const lon0 = origin?.lon ?? track.lon[0];
     const k = Math.PI / 180;
     const cos0 = Math.cos(lat0 * k);
     const xs = track.lon.map((lo) => (lo - lon0) * k * R * cos0);
@@ -34,7 +39,7 @@ export function TrackView({ track, marker, window: win, onPick }: Props) {
     const span = Math.max(dx, dy);
     const step = niceStep(span / 5);
     return { xs, ys, minX, maxX, minY, maxY, step, span };
-  }, [track]);
+  }, [track, origin]);
 
   if (!geo) {
     return <div className="empty">No position data in this log, so there is no flight path to draw.</div>;
@@ -98,6 +103,10 @@ export function TrackView({ track, marker, window: win, onPick }: Props) {
         )}
         <circle cx={px(geo.xs[0])} cy={py(geo.ys[0])} r={5} fill="var(--chart-surface)" stroke="var(--text)" strokeWidth={2} />
         <rect x={px(geo.xs[geo.xs.length - 1]) - 4} y={py(geo.ys[geo.ys.length - 1]) - 4} width={8} height={8} fill="var(--text)" />
+        {m != null && heading != null && Number.isFinite(heading) && (
+          <path transform={`translate(${px(geo.xs[m])} ${py(geo.ys[m])}) rotate(${heading})`}
+            d="M 0 -16 L 5 -6 L -5 -6 Z" fill="var(--accent)" />
+        )}
         {m != null && (
           <g>
             <circle cx={px(geo.xs[m])} cy={py(geo.ys[m])} r={9} fill="var(--accent)" opacity={0.2} />
@@ -109,7 +118,7 @@ export function TrackView({ track, marker, window: win, onPick }: Props) {
           <text x={W - 10} y={18} textAnchor="end">N ↑</text>
         </g>
       </svg>
-      <div className="chart-legend" style={{ paddingTop: 8 }}>
+      {!compact && <div className="chart-legend" style={{ paddingTop: 8 }}>
         <span>○ take-off</span>
         <span>■ end</span>
         {m != null && (
@@ -120,7 +129,7 @@ export function TrackView({ track, marker, window: win, onPick }: Props) {
           </span>
         )}
         <span className="faint" style={{ marginLeft: "auto" }}>{track.source}</span>
-      </div>
+      </div>}
     </div>
   );
 }

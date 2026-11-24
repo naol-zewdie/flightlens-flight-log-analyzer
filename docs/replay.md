@@ -1,10 +1,11 @@
 # Replay
 
-!!! note "Specification for FlightLens 1.1"
-    This page describes what Replay does and how it behaves. It is written
-    before the code, as the specification the release is built and tested
-    against ([integration plan](replay/integration-plan.md), release 1.1).
-    Until 1.1 is released, none of it exists yet.
+!!! note "New in FlightLens 1.1"
+    This page was written before the code, as the specification Replay is
+    built and tested against ([integration plan](replay/integration-plan.md),
+    release 1.1). Try it with `flightlens demo` and the flight
+    `quad-12-manoeuvres.bin`: a scripted 30° roll, 45° pitch, 90° turn and
+    20 m square.
 
 Replay plays an analyzed flight back: a 3D aircraft flies the logged path with
 the logged attitude, while flight instruments, charts, the timeline and a map
@@ -62,8 +63,9 @@ timeline, then the rest.
 - **Cameras** (buttons, or keys 1-4):
     1. **Chase:** behind and above the aircraft, following its heading.
     2. **Orbit:** around the aircraft; drag to rotate, scroll to zoom.
-    3. **Top:** straight down, north up, like the map.
-    4. **Cockpit:** from the aircraft, looking forward.
+    3. **Top:** straight down, north up, without perspective, like the map.
+    4. **Cockpit:** from the aircraft, looking forward; the horizon tilts
+       with the bank.
 
 ### Instruments (HUD)
 

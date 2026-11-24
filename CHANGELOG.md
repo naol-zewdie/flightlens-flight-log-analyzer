@@ -6,6 +6,29 @@ All notable changes to FlightLens. The format follows
 `flightlens checks` and stored in every report) changes whenever its logic or
 thresholds do.
 
+## [1.1.0] - unreleased
+
+### Added
+- **Replay** ([docs/replay.md](docs/replay.md)): a Replay tab on every
+  flight. A 3D aircraft flies the logged path with the logged attitude, with
+  flight instruments, a map, synced charts (follow mode) and the timeline on
+  one clock; chase, orbit, top and cockpit cameras; play, speed (0.25x-16x),
+  loop a range (shift-drag), keyboard control; "Replay from here" on every
+  finding and event; `?t=` links. Works for PX4, ArduPilot and telemetry
+  logs, offline; three.js loads only when the tab is opened.
+- The replay is built with every analysis (`replay.parquet`, `replay.json`):
+  slerp-interpolated attitude, never interpolated across gaps over 1 s;
+  served as `/api/flights/{id}/replay` and `/replay.bin` (about 3 MB per hour
+  of flight). Flights analyzed before 1.1 show as outdated.
+- PX4 logs carry the attitude quaternion (`att.q0`-`q3`; mapping
+  `px4-2026.11.6`).
+- `flightlens replay-info <log>`; a scripted known-manoeuvre flight
+  (`flightlens.sim.manoeuvre`, demo flight `quad-12-manoeuvres.bin`) against
+  which the replay is checked: exact for onboard logs, within 0.2° and 0.17 m
+  for telemetry logs (see [validation](docs/validation.md)).
+- Browser tests of the Replay tab (Playwright) and web unit tests (vitest),
+  both in CI.
+
 ## [1.0.0] - unreleased
 
 The first public release. FlightLens reads PX4 `.ulg`, ArduPilot `.bin` and

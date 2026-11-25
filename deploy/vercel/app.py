@@ -48,7 +48,11 @@ def _hosts() -> list[str]:
     return [*LOCAL_HOSTS, *(n.strip().lower() for n in names if n.strip())]
 
 
-app = create_app(_library(), WEB, allowed_hosts=_hosts(), read_only=True, workers=1)
+# min_free_bytes=0: the free-space check guards uploads, which a read-only demo
+# never takes, and /tmp on Vercel is small (health would always say "degraded")
+app = create_app(
+    _library(), WEB, allowed_hosts=_hosts(), read_only=True, workers=1, min_free_bytes=0
+)
 
 # Start the (idle) job workers now rather than in the ASGI lifespan, which a
 # serverless runtime may not run; health reports them. Nothing is ever queued:

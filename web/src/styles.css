@@ -492,3 +492,13 @@ textarea.input { height: auto; padding: 8px 10px; resize: vertical; line-height:
 .moment-link:hover { background: var(--surface-hover); }
 .moment-link .num { min-width: 92px; }
 @media (max-width: 900px) { .debrief { grid-template-columns: minmax(0, 1fr); } }
+
+/* --- Incident mode ------------------------------------------------------------------- */
+.incident { border-color: color-mix(in srgb, var(--problem) 45%, var(--line)); }
+.incident-head { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
+.incident-head h2 { margin: 2px 0 4px; }
+.incident-head p { margin: 0; font-size: 13px; }
+.causes { margin: 6px 0 0; padding-left: 22px; display: grid; gap: 4px; font-size: 13px; }
+.link-like { all: unset; cursor: pointer; }
+.link-like:hover { text-decoration: underline; }
+.link-like:focus-visible { outline: 2px solid var(--focus); }

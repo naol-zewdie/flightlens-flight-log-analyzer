@@ -136,6 +136,8 @@ export interface Finding {
   /** Stable id within the flight (check@start second); reviews are keyed by it. */
   key?: string;
   review?: Review | null;
+  /** For a crash or other outcome: titles of the likely causes found earlier, in time order. */
+  related?: string[];
 }
 
 export type ReviewStatus = "confirmed" | "false_alarm" | "accepted";

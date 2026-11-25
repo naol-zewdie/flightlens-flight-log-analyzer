@@ -19,6 +19,7 @@ import { coverage, videoApi, type Video } from "./video";
 import { VideoPanel } from "./VideoPanel";
 import { notesApi, type Note } from "./notes";
 import { NotesPanel } from "./NotesPanel";
+import { criticalWindow, IncidentPanel, incidentFor, INCIDENT_LEAD_S, type Incident } from "./IncidentPanel";
 
 /** Seconds before a finding that "Replay from here" and the list jump to. */
 export const LEAD_S = 5;
@@ -66,7 +67,17 @@ export default function ReplayView() {
   }
   if (!replay) return <div className="empty">Loading the replay…</div>;
   const t0 = Number(params.get("t"));
-  const initial = params.has("t") && Number.isFinite(t0) ? t0 : cursor ?? replay.meta.start;
+  const incident = incidentFor(params.get("incident"), findings);
+  const initial = incident
+    ? Math.max(replay.meta.start, incident.finding.start! - INCIDENT_LEAD_S)
+    : params.has("t") && Number.isFinite(t0) ? t0 : cursor ?? replay.meta.start;
+  const setParam = (name: string, value: string | null) =>
+    setParams((p) => {
+      const next = new URLSearchParams(p);
+      if (value == null) next.delete(name);
+      else next.set(name, value);
+      return next;
+    }, { replace: true });
   return (
     <ReplayScreen
       key={flight.id}
@@ -76,7 +87,9 @@ export default function ReplayView() {
       events={events}
       track={track}
       setCursor={setCursor}
-      setTimeParam={(t) => setParams(t == null ? {} : { t: t.toFixed(1) }, { replace: true })}
+      setTimeParam={(t) => setParam("t", t == null ? null : t.toFixed(1))}
+      incident={incident}
+      exitIncident={() => setParam("incident", null)}
       flightId={flight.id}
       logStart={flight.start_time}
       readOnly={readOnly}
@@ -92,15 +105,22 @@ interface ScreenProps {
   track: ReturnType<typeof useFlight>["track"];
   setCursor: (t: number | null) => void;
   setTimeParam: (t: number | null) => void;
+  incident: Incident | null;
+  exitIncident: () => void;
   flightId: string;
   logStart: string | null;
   readOnly: boolean;
 }
 
-function ReplayScreen({ replay, initial, findings, events, track, setCursor, setTimeParam, flightId, logStart, readOnly }: ScreenProps) {
+function ReplayScreen({ replay, initial, findings, events, track, setCursor, setTimeParam, incident, exitIncident, flightId, logStart, readOnly }: ScreenProps) {
   const { meta } = replay;
   const clock = useMemo(() => createClock(meta.start, meta.end, initial), [replay]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => clock.dispose(), [clock]);
+  // incident mode loops the critical window around the finding
+  const incidentKey = incident?.finding.key;
+  useEffect(() => {
+    if (incident) clock.setLoop(criticalWindow(incident.finding, meta.start, meta.end));
+  }, [clock, incidentKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const [camera, setCamera] = useState<CameraMode>("chase");
   const [follow, setFollow] = useState(true);
   const [panels, setPanels] = useState(storedPanels);
@@ -182,6 +202,10 @@ function ReplayScreen({ replay, initial, findings, events, track, setCursor, set
 
   return (
     <div className="replay">
+      {incident && (
+        <IncidentPanel incident={incident} clock={clock} flightId={flightId} readOnly={readOnly}
+          onExit={() => { clock.setLoop(null); exitIncident(); }} />
+      )}
       <div className="replay-stage">
         <section className="card replay-scene" aria-label="3D view">
           <Scene3D replay={replay} clock={clock} findings={findings} camera={camera} notes={notes} />

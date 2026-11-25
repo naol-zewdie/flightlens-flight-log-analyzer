@@ -339,3 +339,30 @@ def test_a_note_written_in_the_replay(server: Any, browser: Any) -> None:
     page.wait_for_selector(".debrief-side")
     assert "Holds 30 degrees" in page.locator(".debrief-side").inner_text()
     page.close()
+
+
+# --- incident mode (1.4) -----------------------------------------------------------------
+
+
+def test_incident_mode_from_a_crash(server: Any, browser: Any) -> None:
+    import httpx
+
+    base, ids = server
+    fid = ids["plane-04-crash.bin"]
+    crash = next(f for f in httpx.get(f"{base}/api/flights/{fid}/findings").json()["findings"]
+                 if f["check_id"] == "flight.crash")  # fmt: skip
+    page = browser.new_page(viewport={"width": 1280, "height": 900})
+    page.goto(f"{base}/flights/{fid}", wait_until="domcontentloaded", timeout=120_000)
+    page.get_by_role("link", name="Investigate").first.click()
+    page.wait_for_selector(".incident", timeout=120_000)
+    assert abs(_time(page) - max(0.0, crash["start"] - 60)) < 0.3  # a minute before
+    assert crash["title"] in page.locator(".incident h2").inner_text()
+    causes = page.locator(".causes li").all_inner_texts()
+    assert len(causes) == len(crash["related"]) > 0
+    loop = page.locator("button[title='Stop looping']")
+    assert loop.count() == 1 and "Loop" in loop.inner_text()  # critical window looped
+    page.get_by_role("button", name="Start a debrief").click()
+    page.wait_for_selector(".debrief-form textarea", timeout=60_000)
+    summary = page.locator(".debrief-form textarea").first.input_value()
+    assert summary.startswith(crash["title"]) and "Likely causes found by FlightLens" in summary
+    page.close()

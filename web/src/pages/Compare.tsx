@@ -99,6 +99,11 @@ export function Compare() {
             Two flights on the same signals, aligned at takeoff (t = 0)
           </div>
         </div>
+        {aId && bId && (
+          <Link className="btn" to={`/compare/replay?a=${aId}&b=${bId}`} title="Both flights in one 3D scene on one clock">
+            Replay both in 3D
+          </Link>
+        )}
       </div>
       {error && <div className="card card-body sev-problem" style={{ marginBottom: 16 }}>{error}</div>}
 

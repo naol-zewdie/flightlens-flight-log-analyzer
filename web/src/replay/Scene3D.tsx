@@ -30,7 +30,7 @@ interface Props {
 
 /** A theme colour as a three.js colour. Translucent tokens (rgba) are blended onto
  *  the chart surface first, since three.js line colours have no alpha. */
-function color(v: string, fallback: string): THREE.Color {
+export function color(v: string, fallback: string): THREE.Color {
   const raw = cssVar(v) || fallback;
   const m = raw.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$/);
   if (!m || m[4] === undefined) return new THREE.Color(raw);
@@ -41,7 +41,7 @@ function color(v: string, fallback: string): THREE.Color {
 }
 
 /** Simple aircraft models in body axes: x forward, y right, z down (1 unit ≈ 1 m). */
-function buildAircraft(vehicle: string | null, accent: THREE.Color, body: THREE.Color): THREE.Group {
+export function buildAircraft(vehicle: string | null, accent: THREE.Color, body: THREE.Color): THREE.Group {
   const g = new THREE.Group();
   const mat = new THREE.MeshStandardMaterial({ color: body, roughness: 0.6, metalness: 0.1 });
   const nose = new THREE.MeshStandardMaterial({ color: accent, roughness: 0.4 });
@@ -91,7 +91,7 @@ function buildAircraft(vehicle: string | null, accent: THREE.Color, body: THREE.
   return g;
 }
 
-function niceStep(raw: number): number {
+export function niceStep(raw: number): number {
   const p = 10 ** Math.floor(Math.log10(Math.max(raw, 1e-6)));
   const f = raw / p;
   return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p;

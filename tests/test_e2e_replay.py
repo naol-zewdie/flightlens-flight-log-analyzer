@@ -366,3 +366,34 @@ def test_incident_mode_from_a_crash(server: Any, browser: Any) -> None:
     summary = page.locator(".debrief-form textarea").first.input_value()
     assert summary.startswith(crash["title"]) and "Likely causes found by FlightLens" in summary
     page.close()
+
+
+def test_two_flights_replay_together(server: Any, browser: Any, tmp_path: Path) -> None:
+    base, ids = server
+    a, b = ids["manoeuvres.bin"], ids["plane-04-crash.bin"]
+    page = browser.new_page(viewport={"width": 1280, "height": 900})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(f"{base}/compare?a={a}&b={b}", wait_until="domcontentloaded", timeout=120_000)
+    page.get_by_role("link", name="Replay both in 3D").click()
+    page.wait_for_selector(".replay-scene .scene3d canvas", timeout=120_000)
+    page.wait_for_selector(".side-by-side")
+    rows = page.locator(".side-by-side tbody tr").all_inner_texts()
+    assert any(r.startswith("Height") for r in rows) and len(rows) == 6
+    assert page.locator(".chart-grid .eyebrow").count() >= 2  # roll, height (battery if logged)
+    # play: the aligned clock advances; both aircraft follow it
+    page.keyboard.press("Space")
+    page.wait_for_timeout(1200)
+    page.keyboard.press("Space")
+    shown = page.locator(".time-readout").inner_text()
+    assert shown.startswith("+") or shown.startswith("−")
+    # align B at another moment: the page re-aligns without errors
+    select = page.get_by_label("Align flight B at")
+    options = select.locator("option").all_inner_texts()
+    assert options[0] == "Take-off" and len(options) > 2
+    select.select_option(index=2)
+    page.wait_for_selector(".replay-scene .scene3d canvas")
+    assert "zb=" in page.url
+    page.screenshot(path=str(tmp_path / "compare.png"))
+    assert errors == []
+    page.close()

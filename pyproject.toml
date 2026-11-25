@@ -1,6 +1,6 @@
 [project]
 name = "flightlens"
-version = "1.4.0"
+version = "1.4.1"
 description = "Automatic drone flight log analysis: a health verdict, ranked findings and the evidence behind them."
 readme = "README.md"
 license = { text = "MIT" }

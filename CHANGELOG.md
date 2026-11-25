@@ -6,7 +6,7 @@ All notable changes to FlightLens. The format follows
 `flightlens checks` and stored in every report) changes whenever its logic or
 thresholds do.
 
-## [Unreleased]
+## [1.4.1] - 2026-11-25
 
 ### Fixed
 - The demo planes flew sideways in the 3D replay: their generated logs recorded

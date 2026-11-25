@@ -1,6 +1,6 @@
 # Check reference
 
-Generated from FlightLens 1.4.0 by `scripts/gen_check_docs.py`; `flightlens checks` prints the same from the installed version. Thresholds are starting values, not limits approved for your aircraft; override them with `analyze(flight, config={"vibration.level": {"attention": 25}})`.
+Generated from FlightLens 1.4.1 by `scripts/gen_check_docs.py`; `flightlens checks` prints the same from the installed version. Thresholds are starting values, not limits approved for your aircraft; override them with `analyze(flight, config={"vibration.level": {"attention": 25}})`.
 
 ## Attitude tracking check
 

@@ -15,15 +15,17 @@ import { createClock, RATES, throttleTime, useClock, type Clock } from "./clock"
 import { eulerOf, loadReplay, stateAt, type Replay } from "./data";
 import { Hud } from "./Hud";
 import { CAMERAS, Scene3D, type CameraMode } from "./Scene3D";
+import { coverage, videoApi, type Video } from "./video";
+import { VideoPanel } from "./VideoPanel";
 
 /** Seconds before a finding that "Replay from here" and the list jump to. */
 export const LEAD_S = 5;
 const FOLLOW_WINDOW_S = 60;
-const PANELS = ["hud", "map", "charts", "list"] as const;
+const PANELS = ["video", "hud", "map", "charts", "list"] as const;
 type Panel = (typeof PANELS)[number];
 
 function storedPanels(): Record<Panel, boolean> {
-  const all = { hud: true, map: true, charts: true, list: true };
+  const all = { video: true, hud: true, map: true, charts: true, list: true };
   try {
     const raw = localStorage.getItem("fl-replay-panels");
     return raw ? { ...all, ...JSON.parse(raw) } : all;
@@ -74,6 +76,8 @@ export default function ReplayView() {
       setCursor={setCursor}
       setTimeParam={(t) => setParams(t == null ? {} : { t: t.toFixed(1) }, { replace: true })}
       flightId={flight.id}
+      logStart={flight.start_time}
+      readOnly={readOnly}
     />
   );
 }
@@ -87,9 +91,11 @@ interface ScreenProps {
   setCursor: (t: number | null) => void;
   setTimeParam: (t: number | null) => void;
   flightId: string;
+  logStart: string | null;
+  readOnly: boolean;
 }
 
-function ReplayScreen({ replay, initial, findings, events, track, setCursor, setTimeParam, flightId }: ScreenProps) {
+function ReplayScreen({ replay, initial, findings, events, track, setCursor, setTimeParam, flightId, logStart, readOnly }: ScreenProps) {
   const { meta } = replay;
   const clock = useMemo(() => createClock(meta.start, meta.end, initial), [replay]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => clock.dispose(), [clock]);
@@ -100,6 +106,16 @@ function ReplayScreen({ replay, initial, findings, events, track, setCursor, set
   const rate = useClock(clock, (s) => s.rate);
   const loop = useClock(clock, (s) => s.loop);
   const [slowTime, setSlowTime] = useState(clock.get().time); // ~10 Hz, for charts and lists
+  const [videos, setVideos] = useState<Video[]>([]);
+  const [selectedVideo, setSelectedVideo] = useState<string | null>(null);
+  useEffect(() => {
+    videoApi.list(flightId).then((v) => {
+      setVideos(v);
+      setSelectedVideo((cur) => cur ?? v[0]?.id ?? null);
+    }, () => undefined);
+  }, [flightId]);
+  const shown = videos.find((v) => v.id === selectedVideo);
+  const covered = shown ? coverage(shown) : null;
 
   // The clock moves the cursor every tab shares, and the URL when paused.
   useEffect(() => throttleTime(clock, 100, (t) => {
@@ -171,8 +187,12 @@ function ReplayScreen({ replay, initial, findings, events, track, setCursor, set
             <div className="scene-note" role="status">{notes.map((n) => <div key={n}>{n}</div>)}</div>
           )}
         </section>
-        {(panels.hud || panels.map) && (
+        {(panels.video || panels.hud || panels.map) && (
           <aside className="replay-side">
+            {panels.video && (
+              <VideoPanel videos={videos} setVideos={setVideos} selected={selectedVideo} setSelected={setSelectedVideo}
+                clock={clock} flightId={flightId} logStart={logStart} readOnly={readOnly} />
+            )}
             {panels.hud && <section className="card card-body"><Hud replay={replay} clock={clock} /></section>}
             {panels.map && track && track.lat.length > 1 && (
               <section className="card card-body" aria-label="Map">
@@ -205,13 +225,14 @@ function ReplayScreen({ replay, initial, findings, events, track, setCursor, set
           <div className="segmented" role="group" aria-label="Panels">
             {PANELS.map((p) => (
               <button key={p} aria-pressed={panels[p]} onClick={() => togglePanel(p)}>
-                {p === "hud" ? "Instruments" : p === "map" ? "Map" : p === "charts" ? "Charts" : "List"}
+                {p === "video" ? "Video" : p === "hud" ? "Instruments" : p === "map" ? "Map" : p === "charts" ? "Charts" : "List"}
               </button>
             ))}
           </div>
         </div>
         <Timeline duration={meta.end} events={events} findings={findings} cursor={slowTime}
-          onPick={(t) => clock.seek(t)} loop={loop} onLoop={(r) => clock.setLoop(r)} gaps={meta.gaps} />
+          onPick={(t) => clock.seek(t)} loop={loop} onLoop={(r) => clock.setLoop(r)} gaps={meta.gaps}
+          coverage={covered ? [covered] : undefined} />
       </section>
 
       {panels.charts && (
@@ -223,12 +244,18 @@ function ReplayScreen({ replay, initial, findings, events, track, setCursor, set
   );
 }
 
+/** mm:ss.t, rounded down to the tenth: 40.79 s is 00:40.7 (fmtTime rounds whole seconds). */
+export function fmtTenths(t: number): string {
+  const tenths = Math.floor(Math.max(0, t) * 10 + 1e-6);
+  return `${fmtTime(Math.floor(tenths / 10))}.${tenths % 10}`;
+}
+
 function TimeReadout({ clock }: { clock: Clock }) {
   const t = useClock(clock, (s) => s.time);
   const end = useClock(clock, (s) => s.end);
   return (
     <span className="num time-readout" aria-live="off">
-      {fmtTime(t)}.{String(Math.floor((t % 1) * 10)).padStart(1, "0")} <span className="faint">/ {fmtTime(end)}</span>
+      {fmtTenths(t)} <span className="faint">/ {fmtTime(end)}</span>
     </span>
   );
 }

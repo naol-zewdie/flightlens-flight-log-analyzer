@@ -131,6 +131,32 @@ def _v5_job_attempts(db: sqlite3.Connection, data: Path) -> None:
     _add_column(db, "jobs", "attempts", "INTEGER NOT NULL DEFAULT 0")
 
 
+def _v6_videos(db: sqlite3.Connection, data: Path) -> None:
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS videos (
+            id               TEXT PRIMARY KEY,
+            flight_id        TEXT NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
+            filename         TEXT NOT NULL,   -- as uploaded, for display
+            file             TEXT NOT NULL,   -- <id>.<ext> in flights/<flight>/videos/
+            sha256           TEXT NOT NULL,
+            size_bytes       INTEGER,
+            duration_s       REAL,
+            width            INTEGER,
+            height           INTEGER,
+            codec            TEXT,
+            fps              REAL,
+            created_at_media TEXT,            -- container creation time (UTC ISO), if any
+            offset_s         REAL,            -- log time = offset_s + rate * video time
+            rate             REAL NOT NULL DEFAULT 1.0,
+            sync_method      TEXT NOT NULL DEFAULT 'none',  -- none | metadata | manual | points
+            sync_points      TEXT,            -- JSON [[video_t, log_t], ...]
+            label            TEXT,
+            uploaded_at      REAL NOT NULL
+        )"""
+    )
+    db.execute("CREATE INDEX IF NOT EXISTS videos_flight ON videos(flight_id)")
+
+
 Migration = Callable[[sqlite3.Connection, Path], None]
 MIGRATIONS: tuple[tuple[int, str, Migration], ...] = (
     (1, "flights and analysis jobs", _v1_flights_and_jobs),
@@ -138,6 +164,7 @@ MIGRATIONS: tuple[tuple[int, str, Migration], ...] = (
     (3, "threshold profiles", _v3_threshold_profiles),
     (4, "engineer reviews and analysis versions", _v4_reviews_and_analysis_versions),
     (5, "job attempts, so interrupted jobs resume", _v5_job_attempts),
+    (6, "videos attached to flights", _v6_videos),
 )
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 

@@ -322,8 +322,12 @@ def backup_cmd(
             help="Leave out analysis results (much smaller; they are rebuilt on restore).",
         ),
     ] = False,
+    no_video: Annotated[
+        bool,
+        typer.Option("--no-video", help="Leave out attached videos (they are not restored)."),
+    ] = False,
 ) -> None:
-    """Back up the library: database, original logs and analysis results.
+    """Back up the library: database, original logs, videos and analysis results.
 
     Safe while `flightlens serve` is running: the database is copied with
     SQLite's online backup, so the copy is consistent.
@@ -331,13 +335,18 @@ def backup_cmd(
     from flightlens import backup
 
     try:
-        s = backup.create(_data_dir(data), out, include_analysis=not no_analysis)
+        s = backup.create(
+            _data_dir(data), out, include_analysis=not no_analysis, include_video=not no_video
+        )
     except backup.BackupError as exc:
         err_console.print(f"[red]error:[/] {exc}")
         raise typer.Exit(EXIT_USAGE) from None
     console.print(
-        f"{s.flights} flights backed up to {s.path} ({s.size_bytes / 1e6:.1f} MB"
-        f"{'' if s.included_analysis else ', without analysis results'})"
+        f"{s.flights} flights"
+        + (f" and {s.videos} video{'s' if s.videos != 1 else ''}" if s.videos else "")
+        + f" backed up to {s.path} ({s.size_bytes / 1e6:.1f} MB"
+        + f"{'' if s.included_analysis else ', without analysis results'}"
+        + f"{', without videos' if no_video else ''})"
     )
 
 

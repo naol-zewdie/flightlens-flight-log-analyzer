@@ -157,23 +157,24 @@ frontend tasks.
 
 ### 1.2 Video (branch `feature/video`)
 
-- [ ] **Migration 6.** `videos` table (section 6) in `schema.MIGRATIONS`. *Accept:* migrating a copy of a real library from 5 to 6 keeps every row, with a safety copy (extend `tests/test_data_safety.py`).
-- [ ] **Upload guard.** Generalize `RequestGuard`'s upload rule to a route table (`/api/logs`: 1 GB; `/api/flights/{id}/videos`: `MAX_VIDEO_BYTES`), both through `upload_refusal`. *Accept:* the existing upload tests pass; the video route refuses oversize, queue-full and low-disk uploads before reading.
-- [ ] **Media module.** `media.py` (*new*): streamed upload with SHA-256 while writing, MP4 (H.264/AAC) and WebM only, `ffprobe` metadata when available (duration, size, codec, creation time); `ffmpeg` and `ffprobe` added to the `Dockerfile`. *Accept:* `tests/test_videos.py` with a tiny generated clip.
-- [ ] **Video API.** `POST/GET /api/flights/{id}/videos`, `GET /api/videos/{video_id}/file` (`FileResponse`, Range), `PATCH`, `DELETE`. *Accept:* 206 with correct bytes and `Content-Range`; read-only refusal; deleting the flight removes its videos.
-- [ ] **Video panel.** `components/VideoPanel.tsx` (*new*): follows the clock (native playback at the clock rate; correct when drift > 100 ms, checked every 500 ms); seeks while scrubbing; "no video at this time" state; picker for several videos.
-- [ ] **Sync tools.** Nudge (±1 s, ±0.1 s, ±1 frame); sync points with offset fit (one point) and offset + rate fit (two or more); creation-time first guess labelled as a guess; method and accuracy shown on the panel. *Accept:* vitest for the fit.
-- [ ] **Timeline coverage.** Video coverage bar on `Timeline.tsx`.
-- [ ] **Backup, restore and prune.** Videos in the backup manifest with SHA-256, `--no-video`, `FORMAT_VERSION` 2 with version 1 still restoring; `retention` counts video size. *Accept:* round trip with and without videos; damaged video refused.
-- [ ] **Sync validation with a generated video.** A test helper writes a short WebM/MP4 for the known-manoeuvre flight: a frame counter and a full-screen flash at known log times (take-off, the sharp turn, landing), with a deliberate offset and a 0.1% clock drift. *Accept:* after a two-point sync, every flash lines up with its log time within 100 ms (one frame at 25 fps is 40 ms); one-point sync recovers the offset; results in `docs/validation.md`.
+- [x] **Migration 6.** `videos` table (section 6) in `schema.MIGRATIONS`. *Accept:* migrating a copy of a real library from 5 to 6 keeps every row, with a safety copy (extend `tests/test_data_safety.py`).
+- [x] **Upload guard.** Generalize `RequestGuard`'s upload rule to a route table (`/api/logs`: 1 GB; `/api/flights/{id}/videos`: `MAX_VIDEO_BYTES`), both through `upload_refusal`. *Accept:* the existing upload tests pass; the video route refuses oversize, queue-full and low-disk uploads before reading.
+- [x] **Media module.** `media.py` (*new*): streamed upload with SHA-256 while writing, MP4 (H.264/AAC) and WebM only, `ffprobe` metadata when available (duration, size, codec, creation time); `ffmpeg` and `ffprobe` added to the `Dockerfile`. *Accept:* `tests/test_videos.py` with a tiny generated clip.
+- [x] **Video API.** `POST/GET /api/flights/{id}/videos`, `GET /api/videos/{video_id}/file` (`FileResponse`, Range), `PATCH`, `DELETE`. *Accept:* 206 with correct bytes and `Content-Range`; read-only refusal; deleting the flight removes its videos.
+- [x] **Video panel.** `components/VideoPanel.tsx` (*new*): follows the clock (native playback at the clock rate; correct when drift > 100 ms, checked every 500 ms); seeks while scrubbing; "no video at this time" state; picker for several videos.
+- [x] **Sync tools.** Nudge (±1 s, ±0.1 s, ±1 frame); sync points with offset fit (one point) and offset + rate fit (two or more); creation-time first guess labelled as a guess; method and accuracy shown on the panel. *Accept:* vitest for the fit.
+- [x] **Timeline coverage.** Video coverage bar on `Timeline.tsx`.
+- [x] **Backup, restore and prune.** Videos in the backup manifest with SHA-256, `--no-video`, `FORMAT_VERSION` 2 with version 1 still restoring; `retention` counts video size. *Accept:* round trip with and without videos; damaged video refused.
+- [x] **Sync validation with a generated video.** A test helper writes a short WebM/MP4 for the known-manoeuvre flight: a frame counter and a full-screen flash at known log times (take-off, the sharp turn, landing), with a deliberate offset and a 0.1% clock drift. *Accept:* after a two-point sync, every flash lines up with its log time within 100 ms (one frame at 25 fps is 40 ms); one-point sync recovers the offset; results in `docs/validation.md`.
 
 **Gate 1.2:**
 
-- [ ] upload, list and delete videos; Range streaming; size and disk refusals
-- [ ] nudge and sync points; drift fit with two or more points
-- [ ] video follows play, pause, rate and scrubbing; coverage bar
-- [ ] backup and restore with and without videos; Docker image has `ffprobe`
-- [ ] generated-video sync within 100 ms; full suite and real-log validation pass; tag `v1.2.0`
+- [x] upload, list and delete videos; Range streaming; size and disk refusals
+- [x] nudge and sync points; drift fit with two or more points
+- [x] video follows play, pause, rate and scrubbing; coverage bar
+- [x] backup and restore with and without videos (the Docker image does not get `ffprobe`: see the change log)
+- [x] generated-video sync within 100 ms; full suite and real-log validation pass
+- [ ] tag `v1.2.0`
 
 ### 1.3 Debrief (branch `feature/debrief`)
 
@@ -351,6 +352,15 @@ video offset, so they get the most tests.
   (gzip-compressed float32 columns, decoded with `Float32Array`) next to the
   JSON metadata at `/replay`: columnar JSON would be several times the 5 MB
   budget for a 1-hour flight; the binary table is about 3 MB.
+- 2026-11-24 (1.2 build): the Docker image does **not** get FFmpeg: on
+  Debian slim it adds about 300 MB for metadata only. Without it the MP4
+  header still gives duration, size and creation time, and the browser
+  reports a WebM's duration; only the codec check is lost. Easy to add back.
+  Videos also store `fps` (for the one-frame nudge) and `file` (the stored
+  name). Fixed on the way: the replay's time readout rounded up a second.
+  The playback clock no longer drops a frame gap over 1 s (a busy machine
+  played the flight slower); a hidden tab is detected with the Page
+  Visibility API instead. This was the intermittent e2e failure.
 - 2026-11-24 (1.1 build): HUD screenshots are checked by eye at fixed
   attitudes, and the attitude the HUD shows is asserted in the e2e tests
   (`aria-label` of the horizon); pixel-baseline images were left out as too

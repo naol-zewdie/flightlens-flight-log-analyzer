@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 import zipfile
@@ -326,3 +327,79 @@ def test_restore_refuses_crafted_paths_ids_and_sizes(
     with pytest.raises(backup.BackupError, match="GB is free"):
         backup.restore(good, tmp_path / "full")
     assert not (tmp_path / "full").exists()
+
+
+# --- videos (format 2) -------------------------------------------------------------------------
+
+
+def _library_with_video(library: Path, tmp_path: Path) -> tuple[Path, str, bytes]:
+    from fastapi.testclient import TestClient
+
+    from flightlens.api import create_app
+
+    from .test_videos import tiny_mp4
+
+    data = tmp_path / "with-video"
+    backup.restore(backup.create(library, tmp_path / "base.zip").path, data)
+    content = tiny_mp4()
+    with TestClient(create_app(data), base_url="http://localhost") as c:
+        fid = c.get("/api/flights").json()["flights"][0]["id"]
+        vid = c.post(f"/api/flights/{fid}/videos", files={"file": ("cam.mp4", content)}).json()[
+            "video"
+        ]["id"]
+        c.patch(f"/api/videos/{vid}", json={"offset_s": 4.2, "sync_method": "manual"})
+    return data, vid, content
+
+
+def test_videos_round_trip_and_can_be_left_out(library: Path, tmp_path: Path) -> None:
+    data, vid, content = _library_with_video(library, tmp_path)
+    summary = backup.create(data, tmp_path / "full.zip")
+    assert summary.videos == 1 and summary.videos_bytes == len(content)
+    restored = tmp_path / "restored"
+    result = backup.restore(summary.path, restored)
+    assert result["videos"] == 1
+    store = Store(restored)
+    video = store.get_video(vid)
+    assert video is not None and video["offset_s"] == 4.2 and video["sync_method"] == "manual"
+    path = store.video_path(video)
+    assert path.read_bytes() == content and not os.access(path, os.W_OK)
+
+    small = backup.create(data, tmp_path / "small.zip", include_video=False)
+    assert small.videos == 0 and small.size_bytes < summary.size_bytes
+    bare = tmp_path / "bare"
+    backup.restore(small.path, bare)
+    assert Store(bare).get_video(vid) is None  # no dangling row without its file
+
+    # prune counts what the video frees too
+    flight = next(
+        c
+        for c in retention.candidates(store, 0, keep_reviewed=False, now=time.time() + 1e9)
+        if c.id == video["flight_id"]
+    )
+    assert flight.size_bytes >= len(content)
+
+
+def test_damaged_or_forged_videos_are_refused(library: Path, tmp_path: Path) -> None:
+    data, _vid, _content = _library_with_video(library, tmp_path)
+    good = backup.create(data, tmp_path / "v.zip").path
+
+    def damage(name: str, payload: bytes) -> tuple[str, bytes]:
+        if "/videos/" in name:
+            return name, payload[:-1] + bytes([payload[-1] ^ 1])
+        return name, payload
+
+    def forge(name: str, payload: bytes) -> tuple[str, bytes]:
+        if name == "manifest.json":
+            m = json.loads(payload)
+            m["videos"][0]["file"] = "../../outside.mp4"
+            return name, json.dumps(m).encode()
+        return name, payload
+
+    for i, (change, message) in enumerate(
+        ((damage, "damaged in the backup"), (forge, "invalid video entry"))
+    ):
+        bad = _rewrite(good, tmp_path / f"badv{i}.zip", change)
+        target = tmp_path / f"rv{i}"
+        with pytest.raises(backup.BackupError, match=message):
+            backup.restore(bad, target)
+        assert not target.exists()

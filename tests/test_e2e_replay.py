@@ -137,7 +137,7 @@ def test_play_pause_keys_and_speed(server: Any, browser: Any) -> None:
     elapsed = time.monotonic() - started  # includes the key presses' own round trips
     t1 = _time(page)
     # played at 1x: about the wait, never more than the wall time it had
-    assert 50 + 1.2 < t1 <= 50 + elapsed + 0.3, (t1, elapsed)
+    assert 50 + 1.0 <= t1 <= 50 + elapsed + 0.3, (t1, elapsed)
     page.wait_for_timeout(600)
     assert _time(page) == t1, "paused"
     page.keyboard.press("l")  # faster
@@ -208,3 +208,107 @@ def test_without_webgl_the_rest_of_the_replay_works(server: Any, playwright: Any
     assert _time(page) > 22.3
     assert errors == []
     b.close()
+
+
+# --- video (1.2) ---------------------------------------------------------------------------
+
+# The generated video: it starts 12.3 s into the log, its clock runs 0.1% fast,
+# and it flashes white for 0.2 s at three known video times.
+OFFSET, RATE = 12.3, 1.001
+FLASHES = (10.0, 30.0, 50.0)
+FLASH_S = 0.2
+
+
+def _log_time(video_t: float) -> float:
+    return OFFSET + RATE * video_t
+
+
+@pytest.fixture(scope="module")
+def flash_video(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg not installed")
+    import subprocess
+
+    out = tmp_path_factory.mktemp("video") / "flashes.webm"
+    on = "+".join(f"between(t,{a},{a + FLASH_S - 0.001})" for a in FLASHES)
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=black:s=320x180:r=25:d=60",
+         "-vf", f"drawbox=x=0:y=0:w=iw:h=ih:color=white:t=fill:enable='{on}'",
+         "-c:v", "libvpx-vp9", "-g", "25", "-b:v", "200k", str(out)],
+        check=True,
+    )  # fmt: skip
+    return out
+
+
+def _brightness(page: Any) -> float:
+    """Mean brightness (0-255) of the video's current frame."""
+    return float(
+        page.evaluate(
+            """() => {
+              const v = document.querySelector('.video-frame video');
+              const c = document.createElement('canvas'); c.width = 32; c.height = 18;
+              const g = c.getContext('2d'); g.drawImage(v, 0, 0, 32, 18);
+              const d = g.getImageData(0, 0, 32, 18).data; let s = 0;
+              for (let i = 0; i < d.length; i += 4) s += d[i];
+              return s / (d.length / 4);
+            }"""
+        )
+    )
+
+
+def _settle(page: Any) -> None:
+    page.wait_for_function(
+        "() => { const v = document.querySelector('.video-frame video');"
+        " return v && v.readyState >= 2 && !v.seeking; }",
+        timeout=60_000,
+    )
+    page.wait_for_timeout(250)
+
+
+def test_synced_video_lines_up_with_the_log(server: Any, browser: Any, flash_video: Path) -> None:
+    """After a two-point sync, the flash shows exactly when the log says it happened."""
+    import httpx
+
+    base, ids = server
+    fid = ids["manoeuvres.bin"]
+    with flash_video.open("rb") as fh:
+        r = httpx.post(f"{base}/api/flights/{fid}/videos", files={"file": ("flashes.webm", fh)})
+    assert r.status_code == 201, r.text
+    video = r.json()["video"]
+    # the user marks the first and last flash in both clocks (what "Add sync point" stores)
+    points = [[FLASHES[0], _log_time(FLASHES[0])], [FLASHES[2], _log_time(FLASHES[2])]]
+    rate = (points[1][1] - points[0][1]) / (points[1][0] - points[0][0])
+    offset = points[0][1] - rate * points[0][0]
+    sync = {"offset_s": offset, "rate": rate, "sync_method": "points", "sync_points": points}
+    r = httpx.patch(f"{base}/api/videos/{video['id']}", json=sync)
+    assert r.status_code == 200, r.text
+
+    # the middle flash, which was not marked: on inside its 0.2 s, off just outside
+    mid = _log_time(FLASHES[1])
+    for t, lit in ((mid + 0.05, True), (mid + 0.15, True), (mid - 0.1, False), (mid + 0.3, False)):
+        page = _open(browser, f"{base}/flights/{fid}/replay?t={t:.3f}")
+        _settle(page)
+        b = _brightness(page)
+        assert (b > 200) if lit else (b < 50), (t - mid, b)
+        page.close()
+
+    # playing, the video follows the clock (drift corrected within 100 ms; the readout is 0.1 s)
+    page = _open(browser, f"{base}/flights/{fid}/replay?t={mid - 3:.1f}")
+    _settle(page)
+    page.keyboard.press("Space")
+    worst = 0.0
+    for _ in range(6):
+        page.wait_for_timeout(400)
+        v, t = page.evaluate(
+            "() => [document.querySelector('.video-frame video').currentTime,"
+            " document.querySelector('.time-readout').textContent]"
+        )
+        mm, rest = t.split("/")[0].strip().split(":")
+        log_t = int(mm) * 60 + float(rest)
+        worst = max(worst, abs(v - (log_t - offset) / rate))
+    page.keyboard.press("Space")
+    assert worst < 0.25, worst
+    # the timeline shows which part of the flight has video
+    assert page.locator(".timeline .video-coverage").count() == 1
+    assert "Synced from 2 points" in page.locator(".video-status").inner_text()
+    page.close()

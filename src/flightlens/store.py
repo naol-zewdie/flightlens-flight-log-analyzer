@@ -46,6 +46,12 @@ def safe_suffix(filename: str) -> str:
     return suffix if suffix in KNOWN_SUFFIXES else ".log"
 
 
+def _video_out(row: Any) -> dict[str, Any]:
+    v = dict(row)
+    v["sync_points"] = json.loads(v["sync_points"]) if v.get("sync_points") else []
+    return v
+
+
 def _remove_tree(path: Path) -> None:
     """Delete a folder, including the read-only original log inside it."""
     if not path.exists():
@@ -401,6 +407,77 @@ class Store:
             cur = self._db.execute("DELETE FROM flights WHERE id=?", (flight_id,))
             self._db.commit()
         return cur.rowcount > 0
+
+    # --- videos ---------------------------------------------------------------
+
+    VIDEO_FIELDS = ("offset_s", "rate", "sync_method", "sync_points", "label", "duration_s")
+
+    def videos_dir(self, flight_id: str) -> Path:
+        return self.flight_dir(flight_id) / "videos"
+
+    def add_video(self, flight_id: str, row: dict[str, Any]) -> dict[str, Any]:
+        cols = ", ".join(row)
+        marks = ", ".join("?" for _ in row)
+        with self._lock:
+            self._db.execute(
+                f"INSERT INTO videos (flight_id, {cols}) VALUES (?, {marks})",
+                (flight_id, *row.values()),
+            )
+            self._db.commit()
+        video = self.get_video(str(row["id"]))
+        assert video is not None
+        return video
+
+    def get_video(self, video_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            r = self._db.execute("SELECT * FROM videos WHERE id=?", (video_id,)).fetchone()
+        return _video_out(r) if r else None
+
+    def list_videos(self, flight_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM videos WHERE flight_id=? ORDER BY uploaded_at", (flight_id,)
+            ).fetchall()
+        return [_video_out(r) for r in rows]
+
+    def video_path(self, video: dict[str, Any]) -> Path:
+        return self.videos_dir(str(video["flight_id"])) / str(video["file"])
+
+    def update_video(self, video_id: str, changes: dict[str, Any]) -> dict[str, Any] | None:
+        bad = set(changes) - set(self.VIDEO_FIELDS)
+        if bad:
+            raise ValueError(f"cannot change {', '.join(sorted(bad))}")
+        if changes:
+            values = [
+                json.dumps(v) if k == "sync_points" and v is not None else v
+                for k, v in changes.items()
+            ]
+            sets = ", ".join(f"{k}=?" for k in changes)
+            with self._lock:
+                self._db.execute(f"UPDATE videos SET {sets} WHERE id=?", (*values, video_id))
+                self._db.commit()
+        return self.get_video(video_id)
+
+    def delete_video(self, video_id: str) -> bool:
+        video = self.get_video(video_id)
+        if video is None:
+            return False
+        path = self.video_path(video)
+        if path.exists():
+            path.chmod(0o644)
+            path.unlink()
+        with self._lock:
+            self._db.execute("DELETE FROM videos WHERE id=?", (video_id,))
+            self._db.commit()
+        return True
+
+    def video_bytes(self) -> dict[str, int]:
+        """Total size of each flight's videos."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT flight_id, coalesce(sum(size_bytes), 0) FROM videos GROUP BY flight_id"
+            ).fetchall()
+        return {r[0]: int(r[1]) for r in rows}
 
     # --- threshold profiles ----------------------------------------------------
 

@@ -153,3 +153,14 @@ describe("clock", () => {
     expect(n).toBe(1);
   });
 });
+
+describe("time readout", () => {
+  it("rounds down to the tenth, never up to the next second", async () => {
+    const { fmtTenths } = await import("./ReplayView");
+    expect(fmtTenths(40.79)).toBe("00:40.7");
+    expect(fmtTenths(40.5)).toBe("00:40.5");
+    expect(fmtTenths(59.99)).toBe("00:59.9");
+    expect(fmtTenths(60)).toBe("01:00.0");
+    expect(fmtTenths(0.3)).toBe("00:00.3");
+  });
+});

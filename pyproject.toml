@@ -61,7 +61,7 @@ packages = ["src/flightlens"]
 artifacts = ["src/flightlens/web"]
 
 [tool.hatch.build.targets.sdist]
-exclude = ["testdata/real", "private-logs", "data", "web/node_modules", "web/dist"]
+exclude = ["testdata/real", "private-logs", "data", "web/node_modules", "web/dist", "deploy/vercel/demo-data"]
 
 [tool.ruff]
 line-length = 100

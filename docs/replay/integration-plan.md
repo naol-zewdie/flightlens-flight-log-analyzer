@@ -218,7 +218,7 @@ done (1.3 stays local and 1.4 builds on it), but nothing is tagged until then.
   `docs/validation.md` regenerated.
 - [x] **Release gate.** CI green on `main` (all jobs, including e2e and
   Docker); full suite; benchmark; `flightlens validate private-logs` (92 of 92).
-- [ ] **Tag and publish.** Tag `v1.4.0`; the release workflow publishes PyPI,
+- [x] **Tag and publish.** Tag `v1.4.0`; the release workflow publishes PyPI,
   the GHCR image (`latest`) and the GitHub release; the docs site deploys from
   `main`. Check each one live.
 - [ ] **Public demo on Vercel (read-only).** The demo flights, analyzed at
@@ -236,7 +236,7 @@ done (1.3 stays local and 1.4 builds on it), but nothing is tagged until then.
   its domain, HTTPS from the host. FlightLens has no login: a public instance
   must sit behind the host's access control or a reverse proxy with
   authentication (see `SECURITY.md`). Needs the user's account and go-ahead.
-- [ ] **Docs.** A deployment page (`docs/deploy.md`): demo, Docker host,
+- [x] **Docs.** A deployment page (`docs/deploy.md`): demo, Docker host,
   configuration, backups on the host.
 
 ### Later (not scheduled)
@@ -421,3 +421,8 @@ video offset, so they get the most tests.
   version, 1.4.0; the v1.2.0 and v1.3.0 tags are not made. Gate on `main` at
   `f1f1413`: CI green on every job; locally 92 of 92 private logs, 54 of 54
   benchmark logs, all browser tests.
+- 2026-11-25 (Vercel spike): Vercel's Python limit is now 500 MB unzipped, so
+  the demo runs the real API (the released package, an estimated 260 MB
+  with the demo library) as a function, read-only, with the library copied to `/tmp`;
+  no static export is needed. Every demo response is under the 4.5 MB limit
+  (largest 2.7 MB). Lives in `deploy/vercel/`; see `docs/deploy.md`.

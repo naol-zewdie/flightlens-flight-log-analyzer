@@ -12,6 +12,7 @@ nav:
       - Real logs: real-log-results.md
       - Labelled log library: sitl-log-library.md
   - Writing a check: writing-a-check.md
+  - Deploying: deploy.md
   - Replay & Debrief:
       - Replay: replay.md
       - Notes and debrief: debrief.md

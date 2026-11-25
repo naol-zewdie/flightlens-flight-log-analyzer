@@ -139,6 +139,11 @@ is shown.
   time*; the timeline shows which part of the flight has video (a bar under
   the strip). Sound is off until you turn it on.
 
+## Notes
+
+Press **N** to write a note at the current moment; see
+[Notes and debrief](debrief.md).
+
 ## Controls
 
 | Action | Mouse | Keyboard |
@@ -151,6 +156,7 @@ is shown.
 | Go to start / end | | Home / End |
 | Loop a range | Shift-drag the timeline | |
 | Camera | buttons | 1 – 4 |
+| Write a note here | Note button | N |
 
 Playback stops at the end of the log, or loops the selected range. Every
 control can be reached with the keyboard and has a label for screen readers.

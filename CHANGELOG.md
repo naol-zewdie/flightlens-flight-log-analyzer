@@ -6,6 +6,22 @@ All notable changes to FlightLens. The format follows
 `flightlens checks` and stored in every report) changes whenever its logic or
 thresholds do.
 
+## [1.3.0] - unreleased
+
+### Added
+- **Notes and debrief** (`docs/debrief.md`): press N in the replay to write a
+  note at that moment (or for the looped range), with tags; notes restore the
+  camera view and show on the timeline and the 3D path. A Debrief tab per
+  flight: open/closed, summary, conclusion, actions, with the notes and the
+  reviewed findings beside it. Library badges and a debrief filter; a debrief
+  column on the Aircraft page.
+- **Debrief report** (`/api/flights/{id}/debrief.html`): facts and verdict,
+  the debrief, one timeline of modes, events, findings with their review and
+  notes, a track with notes and findings on it, and provenance including
+  each video's SHA-256 and sync method. Prints to PDF.
+- Notes and debriefs API; database schema 7; prune keeps flights with notes
+  or a debrief.
+
 ## [1.2.0] - unreleased
 
 ### Added

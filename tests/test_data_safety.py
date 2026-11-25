@@ -403,3 +403,22 @@ def test_damaged_or_forged_videos_are_refused(library: Path, tmp_path: Path) -> 
         with pytest.raises(backup.BackupError, match=message):
             backup.restore(bad, target)
         assert not target.exists()
+
+
+def test_notes_and_debriefs_survive_backup_and_restore(library: Path, tmp_path: Path) -> None:
+    data = tmp_path / "noted"
+    backup.restore(backup.create(library, tmp_path / "base.zip").path, data)
+    store = Store(data)
+    fid = store.list_flights()[0]["id"]
+    note = store.add_note(fid, {"t_start": 12.5, "t_end": 20.0, "text": "check", "tags": ["pilot"]})
+    store.put_debrief(fid, {"status": "closed", "summary": "fine", "actions": ["none"]})
+    for name, kwargs in (
+        ("full", {}),
+        ("lean", {"include_analysis": False, "include_video": False}),
+    ):
+        restored = tmp_path / f"r-{name}"
+        backup.restore(backup.create(data, tmp_path / f"{name}.zip", **kwargs).path, restored)
+        again = Store(restored)
+        assert again.get_note(note["id"]) == note
+        d = again.get_debrief(fid)
+        assert d is not None and d["status"] == "closed" and d["actions"] == ["none"]

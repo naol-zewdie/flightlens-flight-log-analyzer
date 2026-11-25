@@ -199,7 +199,7 @@ def test_debrief_report(client: TestClient) -> None:
     )  # both notes on the track
     assert video["sha256"] in html and "set by hand" in html and "offset 3.50 s" in html
     track = html[html.index('<svg class="track"') : html.index("</svg>")]
-    assert " px" not in track and "N ↑" in track and ' m</text>' in track  # a metre scale bar
+    assert " px" not in track and "N ↑" in track and " m</text>" in track  # a metre scale bar
     # notes, findings and modes in time order
     assert html.index("GPS &lt;drops&gt; here") < html.index("recovers")
     download = client.get(f"/api/flights/{fid}/debrief.html?download=1")

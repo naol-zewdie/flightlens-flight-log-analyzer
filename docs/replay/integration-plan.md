@@ -178,20 +178,21 @@ frontend tasks.
 
 ### 1.3 Debrief (branch `feature/debrief`)
 
-- [ ] **Migration 7.** `notes` and `debriefs` tables. *Accept:* migrating a copy of a real library from 6 to 7 keeps every row.
-- [ ] **Notes API.** `GET/POST /api/flights/{id}/notes`, `PATCH/DELETE /api/notes/{note_id}`; text and tag limits like `reviews.NOTE_MAX`. *Accept:* `tests/test_notes_debrief.py`: CRUD, cross-site and host checks, read-only refusal, cascade on flight delete.
-- [ ] **Notes panel.** `components/NotesPanel.tsx` (*new*): add with N at the cursor, range by shift-drag, starter tags plus free tags; each note stores the camera view and restores it; markers on the timeline and the 3D path; edit and delete inline.
-- [ ] **Debrief.** `GET/PUT /api/flights/{id}/debrief`; `pages/DebriefView.tsx` (*new*): status (open/closed), summary, conclusion, actions, author (a free-text name remembered by the browser); a "Debriefed" badge and filter in `Library.tsx`; a column on the Aircraft page.
-- [ ] **Debrief report.** `debrief.py` (*new*) and `templates/debrief.html.j2` (*new*), in the style of `htmlreport.py`: flight facts and verdict; debrief text; one chronological timeline of modes, events, findings (with review status) and notes; a server-side SVG track with note and finding locations; provenance (FlightLens version, log and video SHA-256, sync method). Optional view snapshots captured in the browser. `GET /api/flights/{id}/debrief.html`. *Accept:* prints cleanly; CSP like the health report.
-- [ ] **Prune and backup.** Notes and debriefs always in backups; flights with notes or a debrief are kept by `prune`.
+- [x] **Migration 7.** `notes` and `debriefs` tables. *Accept:* migrating a copy of a real library from 6 to 7 keeps every row.
+- [x] **Notes API.** `GET/POST /api/flights/{id}/notes`, `PATCH/DELETE /api/notes/{note_id}`; text and tag limits like `reviews.NOTE_MAX`. *Accept:* `tests/test_notes_debrief.py`: CRUD, cross-site and host checks, read-only refusal, cascade on flight delete.
+- [x] **Notes panel.** `components/NotesPanel.tsx` (*new*): add with N at the cursor, range by shift-drag, starter tags plus free tags; each note stores the camera view and restores it; markers on the timeline and the 3D path; edit and delete inline.
+- [x] **Debrief.** `GET/PUT /api/flights/{id}/debrief`; `pages/DebriefView.tsx` (*new*): status (open/closed), summary, conclusion, actions, author (a free-text name remembered by the browser); a "Debriefed" badge and filter in `Library.tsx`; a column on the Aircraft page.
+- [x] **Debrief report.** `debrief.py` (*new*) and `templates/debrief.html.j2` (*new*), in the style of `htmlreport.py`: flight facts and verdict; debrief text; one chronological timeline of modes, events, findings (with review status) and notes; a server-side SVG track with note and finding locations; provenance (FlightLens version, log and video SHA-256, sync method). Optional view snapshots captured in the browser. `GET /api/flights/{id}/debrief.html`. *Accept:* prints cleanly; CSP like the health report.
+- [x] **Prune and backup.** Notes and debriefs always in backups; flights with notes or a debrief are kept by `prune`.
 
 **Gate 1.3:**
 
-- [ ] migration 7 tested on a real library copy
-- [ ] notes: add, range, tags, edit, delete, restore view; markers on the timeline and path
-- [ ] debrief summary and status; Library badge and filter; prune keeps debriefed flights
-- [ ] `debrief.html` prints with provenance; read-only mode blocks every note and debrief edit
-- [ ] full suite and real-log validation pass; tag `v1.3.0`
+- [x] migration 7 tested on a real library copy
+- [x] notes: add, range, tags, edit, delete, restore view; markers on the timeline and path
+- [x] debrief summary and status; Library badge and filter; prune keeps debriefed flights
+- [x] `debrief.html` prints with provenance; read-only mode blocks every note and debrief edit
+- [x] full suite and real-log validation pass
+- [ ] tag `v1.3.0`
 
 ### 1.4 Incident mode and compare (branch `feature/incident`)
 
@@ -352,6 +353,11 @@ video offset, so they get the most tests.
   (gzip-compressed float32 columns, decoded with `Float32Array`) next to the
   JSON metadata at `/replay`: columnar JSON would be several times the 5 MB
   budget for a 1-hour flight; the binary table is about 3 MB.
+- 2026-11-25 (1.3 build): a range note is written for the looped range (the
+  timeline's shift-drag already selects the loop), not by a second
+  shift-drag. Notes store the camera mode; view snapshots (PNG) were left
+  out: the report's server-side track shows where each note is. The
+  report shares its CSS with the health report (`_report_style.css`).
 - 2026-11-24 (1.2 build): the Docker image does **not** get FFmpeg: on
   Debian slim it adds about 300 MB for metadata only. Without it the MP4
   header still gives duration, size and creation time, and the browser

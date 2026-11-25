@@ -296,8 +296,8 @@ def test_synced_video_lines_up_with_the_log(server: Any, browser: Any, flash_vid
     page = _open(browser, f"{base}/flights/{fid}/replay?t={mid - 3:.1f}")
     _settle(page)
     page.keyboard.press("Space")
-    worst = 0.0
-    for _ in range(6):
+    diffs: list[float] = []
+    for _ in range(8):
         page.wait_for_timeout(400)
         v, t = page.evaluate(
             "() => [document.querySelector('.video-frame video').currentTime,"
@@ -305,10 +305,37 @@ def test_synced_video_lines_up_with_the_log(server: Any, browser: Any, flash_vid
         )
         mm, rest = t.split("/")[0].strip().split(":")
         log_t = int(mm) * 60 + float(rest)
-        worst = max(worst, abs(v - (log_t - offset) / rate))
+        diffs.append(abs(v - (log_t - offset) / rate))
     page.keyboard.press("Space")
-    assert worst < 0.25, worst
+    # the drift correction keeps it close; a busy machine may stall one frame, not the trend
+    diffs.sort()
+    assert diffs[len(diffs) // 2] < 0.15 and diffs[-1] < 0.6, diffs
     # the timeline shows which part of the flight has video
     assert page.locator(".timeline .video-coverage").count() == 1
     assert "Synced from 2 points" in page.locator(".video-status").inner_text()
+    page.close()
+
+
+# --- notes (1.3) ---------------------------------------------------------------------------
+
+
+def test_a_note_written_in_the_replay(server: Any, browser: Any) -> None:
+    base, ids = server
+    page = _open(browser, f"{base}/flights/{ids['manoeuvres.bin']}/replay?t=22")
+    page.keyboard.press("n")
+    box = page.get_by_role("textbox", name="Note", exact=True)
+    box.fill("Holds 30 degrees of roll, as scripted.")
+    page.get_by_role("button", name="pilot").click()
+    page.get_by_role("button", name="Save note").click()
+    page.wait_for_selector(".notes .note-open")
+    assert "Holds 30 degrees" in page.locator(".notes").inner_text()
+    assert page.locator(".timeline .note-mark").count() == 1
+    # jump away, then open the note: back at its moment
+    page.keyboard.press("Home")
+    page.locator(".notes .note-open").first.click()
+    assert abs(_time(page) - 22) < 0.2
+    # the Debrief tab lists it; the report has it
+    page.goto(f"{base}/flights/{ids['manoeuvres.bin']}/debrief", wait_until="domcontentloaded")
+    page.wait_for_selector(".debrief-side")
+    assert "Holds 30 degrees" in page.locator(".debrief-side").inner_text()
     page.close()

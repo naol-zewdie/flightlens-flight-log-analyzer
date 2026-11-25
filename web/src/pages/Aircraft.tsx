@@ -211,7 +211,7 @@ export function AircraftPage() {
         <div className="card-head"><h2>Flights</h2></div>
         <table className="data" style={{ marginTop: 8 }}>
           <thead>
-            <tr><th className="r">#</th><th>Verdict</th><th>Flight</th><th>Date</th><th>Firmware</th><th className="r">Score</th><th /></tr>
+            <tr><th className="r">#</th><th>Verdict</th><th>Flight</th><th>Date</th><th>Firmware</th><th>Debrief</th><th className="r">Score</th><th /></tr>
           </thead>
           <tbody>
             {a.flight_list.map((f, i) => (
@@ -222,6 +222,7 @@ export function AircraftPage() {
                 <td><div className="cell-main">{f.filename}</div></td>
                 <td className="muted">{fmtDate(f.start_time, f.uploaded_at)}</td>
                 <td className="muted">{f.firmware ?? "—"}</td>
+                <td>{f.debrief ? <span className={`chip${f.debrief === "closed" ? " ok" : ""}`}>{f.debrief === "closed" ? "Debriefed" : "Open"}</span> : <span className="faint">—</span>}</td>
                 <td className="r num">{f.score ?? "—"}</td>
                 <td className="r" onClick={(e) => e.stopPropagation()}>
                   {i > 0 && (

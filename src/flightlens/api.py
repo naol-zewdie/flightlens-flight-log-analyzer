@@ -568,6 +568,7 @@ def create_app(
             raise HTTPException(404, "No aircraft with this id")
         ordered = sorted(rows, key=fleet.flight_time)
         assigned = store.profile_assignments().get(key)
+        debriefs = store.debrief_statuses()
         return {
             **fleet.summarize_aircraft(key, rows),
             "profile": {**assigned.to_dict(), "defaults": _defaults_for(assigned)}
@@ -590,6 +591,7 @@ def create_app(
                         "serial",
                     )
                 }
+                | {"debrief": debriefs.get(r["id"])}
                 for r in ordered
             ],
         }

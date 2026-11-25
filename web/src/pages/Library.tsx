@@ -22,6 +22,11 @@ const FILTERS: { label: string; value: Verdict | "" }[] = [
   { label: "Healthy", value: "healthy" },
   { label: "Insufficient data", value: "insufficient data" },
 ];
+const DEBRIEF_FILTERS: { label: string; value: string }[] = [
+  { label: "Any", value: "" },
+  { label: "Debriefed", value: "any" },
+  { label: "Not debriefed", value: "none" },
+];
 const ACCEPT = ".ulg,.bin,.tlog";
 
 export function Library() {
@@ -30,6 +35,7 @@ export function Library() {
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [verdict, setVerdict] = useState<Verdict | "">("");
+  const [debrief, setDebrief] = useState("");
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [dragging, setDragging] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
@@ -40,13 +46,13 @@ export function Library() {
 
   const load = useCallback(() => {
     api
-      .flights(q || undefined, verdict || undefined)
+      .flights(q || undefined, verdict || undefined, debrief || undefined)
       .then((r) => {
         setFlights(r.flights);
         setError(null);
       })
       .catch((e) => setError(e.message));
-  }, [q, verdict]);
+  }, [q, verdict, debrief]);
 
   useEffect(() => {
     const id = setTimeout(load, q ? 200 : 0);
@@ -219,6 +225,13 @@ export function Library() {
                 Export reviews ({reviewedCount})
               </a>
             )}
+            <div className="segmented" role="group" aria-label="Filter by debrief">
+              {DEBRIEF_FILTERS.map((f) => (
+                <button key={f.label} aria-pressed={debrief === f.value} onClick={() => setDebrief(f.value)}>
+                  {f.label}
+                </button>
+              ))}
+            </div>
             <div className="segmented" role="group" aria-label="Filter by verdict">
               {FILTERS.map((f) => (
                 <button key={f.label} aria-pressed={verdict === f.value} onClick={() => setVerdict(f.value)}>
@@ -317,6 +330,12 @@ export function Library() {
                         <span style={{ display: "inline-flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                           <FindingCounts p={f.n_problem ?? 0} a={f.n_attention ?? 0} />
                           {f.reviewed ? <span className="chip">{f.reviewed} reviewed</span> : null}
+                          {f.debrief && (
+                            <span className={`chip${f.debrief === "closed" ? " ok" : ""}`} title={f.debrief === "closed" ? "Debriefed and closed" : "Debrief open"}>
+                              {f.debrief === "closed" ? "Debriefed" : "Debrief open"}
+                            </span>
+                          )}
+                          {f.notes ? <span className="chip">{f.notes} note{f.notes === 1 ? "" : "s"}</span> : null}
                           {f.stale && <span className="chip stale" title="Analyzed by an older version">outdated</span>}
                         </span>
                       )}

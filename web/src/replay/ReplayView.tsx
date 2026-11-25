@@ -17,15 +17,17 @@ import { Hud } from "./Hud";
 import { CAMERAS, Scene3D, type CameraMode } from "./Scene3D";
 import { coverage, videoApi, type Video } from "./video";
 import { VideoPanel } from "./VideoPanel";
+import { notesApi, type Note } from "./notes";
+import { NotesPanel } from "./NotesPanel";
 
 /** Seconds before a finding that "Replay from here" and the list jump to. */
 export const LEAD_S = 5;
 const FOLLOW_WINDOW_S = 60;
-const PANELS = ["video", "hud", "map", "charts", "list"] as const;
+const PANELS = ["video", "hud", "map", "charts", "list", "notes"] as const;
 type Panel = (typeof PANELS)[number];
 
 function storedPanels(): Record<Panel, boolean> {
-  const all = { video: true, hud: true, map: true, charts: true, list: true };
+  const all = { video: true, hud: true, map: true, charts: true, list: true, notes: true };
   try {
     const raw = localStorage.getItem("fl-replay-panels");
     return raw ? { ...all, ...JSON.parse(raw) } : all;
@@ -114,6 +116,11 @@ function ReplayScreen({ replay, initial, findings, events, track, setCursor, set
       setSelectedVideo((cur) => cur ?? v[0]?.id ?? null);
     }, () => undefined);
   }, [flightId]);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [composeAt, setComposeAt] = useState<{ t: number; end: number | null } | null>(null);
+  useEffect(() => {
+    notesApi.list(flightId).then(setNotes, () => undefined);
+  }, [flightId]);
   const shown = videos.find((v) => v.id === selectedVideo);
   const covered = shown ? coverage(shown) : null;
 
@@ -155,16 +162,21 @@ function ReplayScreen({ replay, initial, findings, events, track, setCursor, set
       else if (k === "home") clock.seek(meta.start);
       else if (k === "end") clock.seek(meta.end);
       else if (CAMERAS.some((c) => c.key === k)) setCamera(CAMERAS.find((c) => c.key === k)!.mode);
+      else if (k === "n" && !readOnly) {
+        clock.pause();
+        setPanels((cur) => ({ ...cur, notes: true }));
+        setComposeAt({ t: t, end: null });
+      }
       else return;
       e.preventDefault();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [clock, meta]);
+  }, [clock, meta, readOnly]);
 
-  const notes: string[] = [];
-  if (!meta.sources.position) notes.push("No position in this log: the aircraft turns in place, without a path.");
-  if (!meta.sources.attitude) notes.push("No attitude in this log: the model is level, pointing along the direction of travel.");
+  const sceneNotes: string[] = [];
+  if (!meta.sources.position) sceneNotes.push("No position in this log: the aircraft turns in place, without a path.");
+  if (!meta.sources.attitude) sceneNotes.push("No attitude in this log: the model is level, pointing along the direction of travel.");
   const state = stateAt(replay, slowTime);
   const heading = state.q ? eulerOf(state.q).yaw : null;
 
@@ -172,7 +184,7 @@ function ReplayScreen({ replay, initial, findings, events, track, setCursor, set
     <div className="replay">
       <div className="replay-stage">
         <section className="card replay-scene" aria-label="3D view">
-          <Scene3D replay={replay} clock={clock} findings={findings} camera={camera} />
+          <Scene3D replay={replay} clock={clock} findings={findings} camera={camera} notes={notes} />
           <div className="scene-bar">
             <div className="segmented" role="group" aria-label="Camera">
               {CAMERAS.map((c) => (
@@ -183,8 +195,8 @@ function ReplayScreen({ replay, initial, findings, events, track, setCursor, set
             </div>
             {camera === "orbit" && <span className="hint">drag to rotate · scroll to zoom</span>}
           </div>
-          {notes.length > 0 && (
-            <div className="scene-note" role="status">{notes.map((n) => <div key={n}>{n}</div>)}</div>
+          {sceneNotes.length > 0 && (
+            <div className="scene-note" role="status">{sceneNotes.map((n) => <div key={n}>{n}</div>)}</div>
           )}
         </section>
         {(panels.video || panels.hud || panels.map) && (
@@ -225,21 +237,30 @@ function ReplayScreen({ replay, initial, findings, events, track, setCursor, set
           <div className="segmented" role="group" aria-label="Panels">
             {PANELS.map((p) => (
               <button key={p} aria-pressed={panels[p]} onClick={() => togglePanel(p)}>
-                {p === "video" ? "Video" : p === "hud" ? "Instruments" : p === "map" ? "Map" : p === "charts" ? "Charts" : "List"}
+                {p === "video" ? "Video" : p === "hud" ? "Instruments" : p === "map" ? "Map" : p === "charts" ? "Charts" : p === "list" ? "List" : "Notes"}
               </button>
             ))}
           </div>
         </div>
         <Timeline duration={meta.end} events={events} findings={findings} cursor={slowTime}
           onPick={(t) => clock.seek(t)} loop={loop} onLoop={(r) => clock.setLoop(r)} gaps={meta.gaps}
-          coverage={covered ? [covered] : undefined} />
+          coverage={covered ? [covered] : undefined} notes={notes} />
       </section>
 
       {panels.charts && (
         <ReplayCharts flightId={flightId} time={slowTime} follow={follow} setFollow={setFollow}
           clock={clock} duration={meta.end} motors={meta.motors} events={events} />
       )}
-      {panels.list && <MomentList findings={findings} events={events} time={slowTime} clock={clock} />}
+      {(panels.list || panels.notes) && (
+        <div className="replay-bottom">
+          {panels.notes && (
+            <NotesPanel notes={notes} setNotes={setNotes} flightId={flightId} clock={clock} camera={camera}
+              setCamera={(c) => CAMERAS.some((x) => x.mode === c) && setCamera(c as CameraMode)}
+              readOnly={readOnly} composeAt={composeAt} setComposeAt={setComposeAt} />
+          )}
+          {panels.list && <MomentList findings={findings} events={events} time={slowTime} clock={clock} />}
+        </div>
+      )}
     </div>
   );
 }

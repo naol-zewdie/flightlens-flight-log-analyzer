@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { Finding } from "../api";
+import type { Note } from "./notes";
 import { cssVar, useThemeVersion } from "../components/theme";
 import type { Clock } from "./clock";
 import { bodyToWorld, enuToWorld, eulerOf, stateAt, type Quat, type Replay } from "./data";
@@ -23,6 +24,8 @@ interface Props {
   clock: Clock;
   findings: Finding[];
   camera: CameraMode;
+  /** Note markers on the path */
+  notes?: Note[];
 }
 
 /** A theme colour as a three.js colour. Translucent tokens (rgba) are blended onto
@@ -94,7 +97,7 @@ function niceStep(raw: number): number {
   return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p;
 }
 
-export function Scene3D({ replay, clock, findings, camera }: Props) {
+export function Scene3D({ replay, clock, findings, camera, notes = [] }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const cameraMode = useRef(camera);
   const redraw = useRef<() => void>(() => {});
@@ -211,6 +214,19 @@ export function Scene3D({ replay, clock, findings, camera }: Props) {
         if (pts.length < 2) continue;
         const m = new THREE.LineBasicMaterial({ color: color(f.severity === "problem" ? "--problem" : "--attention", "#d03b3b"), linewidth: 2 });
         scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), m));
+      }
+    }
+
+    // note markers: a small diamond at each note's moment on the path
+    if (hasPos) {
+      const noteMat = new THREE.MeshBasicMaterial({ color: color("--series-4", "#6250d6") });
+      for (const n of notes) {
+        const k = Math.round((n.t_start - meta.start) * meta.rate_hz);
+        if (k < 0 || k >= meta.rows || !(cols.valid_pos[k] > 0)) continue;
+        const marker = new THREE.Mesh(new THREE.OctahedronGeometry(Math.max(0.5, span / 120)), noteMat);
+        const up = Number.isFinite(cols.up[k]) ? cols.up[k] : 0;
+        marker.position.set(...enuToWorld(cols.east[k], cols.north[k], up + Math.max(1, span / 60)));
+        scene.add(marker);
       }
     }
 
@@ -352,7 +368,7 @@ export function Scene3D({ replay, clock, findings, camera }: Props) {
       renderer.dispose();
       el.removeChild(renderer.domElement);
     };
-  }, [replay, clock, findings, theme]);
+  }, [replay, clock, findings, theme, notes]);
 
   useEffect(() => redraw.current(), [camera]);
 

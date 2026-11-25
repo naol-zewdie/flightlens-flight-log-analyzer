@@ -57,7 +57,7 @@ for `linux/amd64` and `linux/arm64`:
 docker run -d --name flightlens -p 8000:8000 \
   -v flightlens-data:/data \
   -e FLIGHTLENS_ALLOWED_HOSTS=flightlens.example.com \
-  ghcr.io/naol-zewdie/flightlens:1.4.0
+  ghcr.io/naol-zewdie/flightlens:1.4.1
 ```
 
 What the host needs:

@@ -3,9 +3,9 @@
 # includes the web UI); bump the pin with each release. See docs/deploy.md.
 [project]
 name = "flightlens-demo"
-version = "1.4.0"
+version = "1.4.1"
 requires-python = ">=3.12,<3.13"
-dependencies = ["flightlens==1.4.0"]
+dependencies = ["flightlens==1.4.1"]
 
 [tool.vercel]
 entrypoint = "app:app"

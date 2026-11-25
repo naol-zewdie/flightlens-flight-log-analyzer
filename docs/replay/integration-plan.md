@@ -206,6 +206,38 @@ frontend tasks.
 - [ ] two flights replay together, aligned at take-off or a chosen event
 - [ ] validated on the real crash logs and documented; tag `v1.4.0`
 
+### Final release and deployment
+
+Decided 2026-11-25: 1.2, 1.3 and 1.4 ship **together**, as one release, after
+the 1.4 gate. Each release's branch is still merged into `main` when it is
+done (1.3 stays local and 1.4 builds on it), but nothing is tagged until then.
+
+- [ ] **Version and changelog.** One version (1.4.0) whose changelog entry
+  folds in the unreleased 1.2, 1.3 and 1.4 sections; README and docs current;
+  `docs/validation.md` regenerated.
+- [ ] **Release gate.** CI green on `main` (all jobs, including e2e and
+  Docker); full suite; benchmark; `flightlens validate private-logs` (92 of 92).
+- [ ] **Tag and publish.** Tag `v1.4.0`; the release workflow publishes PyPI,
+  the GHCR image (`latest`) and the GitHub release; the docs site deploys from
+  `main`. Check each one live.
+- [ ] **Public demo on Vercel (read-only).** The demo flights, analyzed at
+  build time, served read-only: replay, video-free reports, charts, debrief
+  report; no uploads. FlightLens's background workers and its SQLite library
+  on disk do not fit Vercel's serverless functions, so the demo is read-only
+  by design. First a spike: whether the API fits a Vercel Python function
+  (250 MB limit; pyarrow and numpy are most of it) with the library copied
+  to `/tmp` at cold start; if not, a static export of the demo's API answers
+  served next to the built UI. Needs the user's Vercel account and their go
+  ahead to deploy.
+- [ ] **Full app on a container host.** The GHCR image with a persistent
+  volume for `/data` on a host that runs containers (Fly.io, Render, Railway,
+  or the user's own server; the user picks), `FLIGHTLENS_ALLOWED_HOSTS` set to
+  its domain, HTTPS from the host. FlightLens has no login: a public instance
+  must sit behind the host's access control or a reverse proxy with
+  authentication (see `SECURITY.md`). Needs the user's account and go-ahead.
+- [ ] **Docs.** A deployment page (`docs/deploy.md`): demo, Docker host,
+  configuration, backups on the host.
+
 ### Later (not scheduled)
 
 VTOL transition events (`vtol_vehicle_status`, ArduPilot `QTUN`); camera
@@ -353,6 +385,9 @@ video offset, so they get the most tests.
   (gzip-compressed float32 columns, decoded with `Float32Array`) next to the
   JSON metadata at `/replay`: columnar JSON would be several times the 5 MB
   budget for a 1-hour flight; the binary table is about 3 MB.
+- 2026-11-25: one final release after 1.4 instead of one per release; a
+  read-only public demo on Vercel plus the full app from the Docker image on
+  a container host (section 5, Final release and deployment).
 - 2026-11-25 (1.3 build): a range note is written for the looped range (the
   timeline's shift-drag already selects the loop), not by a second
   shift-drag. Notes store the camera mode; view snapshots (PNG) were left

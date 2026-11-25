@@ -7,6 +7,8 @@ A backup is one ``.zip``:
 - ``flights/<id>/original.*``: every original log, unchanged;
 - ``flights/<id>/analysis/...``: the analysis results (left out with
   ``include_analysis=False``; they are then rebuilt on restore);
+- ``flights/<id>/videos/<video>.mp4|webm``: attached videos, unchanged (left
+  out with ``include_video=False``, and then dropped from the database);
 - ``manifest.json``: FlightLens and schema version, and each original's SHA-256.
 
 Restore only writes into an empty or new folder, never over a library. It
@@ -34,13 +36,16 @@ from flightlens import __version__
 from flightlens.schema import SCHEMA_VERSION
 
 FORMAT = "flightlens-backup"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
+"""2 adds videos; version 1 backups still restore."""
 DB_NAME = "flightlens.db"
 
 
 FLIGHT_ID = re.compile(r"^[0-9a-f]{16}$")
 """A flight id is the first 16 hex digits of the log's SHA-256 (``Store.create_flight``)."""
 ORIGINAL = re.compile(r"^original\.[a-z0-9]{1,8}$")
+VIDEO_ID = re.compile(r"^[0-9a-f]{16}$")
+VIDEO_FILE = re.compile(r"^[0-9a-f]{16}\.(mp4|webm)$")
 DISK_MARGIN = 256 * 1024**2
 
 
@@ -55,6 +60,8 @@ class BackupSummary:
     originals_bytes: int
     included_analysis: bool
     size_bytes: int
+    videos: int = 0
+    videos_bytes: int = 0
 
 
 def _sha256(path: Path) -> str:
@@ -65,7 +72,9 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def create(data_dir: Path, out: Path, include_analysis: bool = True) -> BackupSummary:
+def create(
+    data_dir: Path, out: Path, include_analysis: bool = True, include_video: bool = True
+) -> BackupSummary:
     """Write a backup of the library in ``data_dir`` to ``out`` (a .zip)."""
     db_path = data_dir / DB_NAME
     if not db_path.is_file():
@@ -80,6 +89,17 @@ def create(data_dir: Path, out: Path, include_analysis: bool = True) -> BackupSu
             src.backup(dest)  # consistent even while the server writes
             schema = int(dest.execute("PRAGMA user_version").fetchone()[0])
             rows = dest.execute("SELECT id, sha256, filename FROM flights ORDER BY id").fetchall()
+            has_videos = dest.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='videos'"
+            ).fetchone()
+            video_rows = []
+            if has_videos and include_video:
+                video_rows = dest.execute(
+                    "SELECT id, flight_id, file, sha256 FROM videos ORDER BY id"
+                ).fetchall()
+            elif has_videos:
+                dest.execute("DELETE FROM videos")  # a backup without videos lists none
+                dest.commit()
         finally:
             dest.close()
             src.close()
@@ -108,6 +128,15 @@ def create(data_dir: Path, out: Path, include_analysis: bool = True) -> BackupSu
                         "filename": filename,
                     }
                 )
+            videos: list[dict[str, Any]] = []
+            video_total = 0
+            for video_id, flight_id, file, sha in video_rows:
+                path = data_dir / "flights" / flight_id / "videos" / file
+                if not path.is_file():
+                    continue  # missing on disk: the restored row will say so
+                video_total += path.stat().st_size
+                z.write(path, f"flights/{flight_id}/videos/{file}")
+                videos.append({"id": video_id, "flight_id": flight_id, "file": file, "sha256": sha})
             manifest = {
                 "format": FORMAT,
                 "format_version": FORMAT_VERSION,
@@ -115,11 +144,15 @@ def create(data_dir: Path, out: Path, include_analysis: bool = True) -> BackupSu
                 "schema_version": schema,
                 "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "include_analysis": include_analysis,
+                "include_video": include_video,
                 "flights": flights,
+                "videos": videos,
             }
             z.writestr("manifest.json", json.dumps(manifest, indent=2))
     part.replace(out)
-    return BackupSummary(out, len(flights), total, include_analysis, out.stat().st_size)
+    return BackupSummary(
+        out, len(flights), total, include_analysis, out.stat().st_size, len(videos), video_total
+    )
 
 
 def _safe_member(name: str) -> PurePosixPath:
@@ -144,6 +177,15 @@ def read_manifest(path: Path) -> dict[str, Any]:
         ):
             raise BackupError(
                 f"{path.name} has an invalid flight entry; it was not made by FlightLens"
+            )
+    for v in manifest.get("videos", []):
+        if not (
+            VIDEO_ID.match(str(v.get("id", "")))
+            and FLIGHT_ID.match(str(v.get("flight_id", "")))
+            and VIDEO_FILE.match(str(v.get("file", "")))
+        ):
+            raise BackupError(
+                f"{path.name} has an invalid video entry; it was not made by FlightLens"
             )
     if (
         int(manifest.get("format_version", 0)) > FORMAT_VERSION
@@ -196,6 +238,14 @@ def restore(
                 raise BackupError(f"the backup is missing the original of {f['filename']}")
             if _sha256(original) != f["sha256"]:
                 raise BackupError(f"{f['filename']} is damaged in the backup (SHA-256 differs)")
+        for v in manifest.get("videos", []):
+            path = staging / "flights" / v["flight_id"] / "videos" / v["file"]
+            if not path.is_file():
+                raise BackupError(f"the backup is missing the video {v['file']}")
+            if _sha256(path) != v["sha256"]:
+                raise BackupError(
+                    f"the video {v['file']} is damaged in the backup (SHA-256 differs)"
+                )
         # all checked: move into place
         for item in staging.iterdir():
             item.replace(data_dir / item.name)
@@ -206,6 +256,8 @@ def restore(
             shutil.rmtree(data_dir, ignore_errors=True)  # leave nothing behind
     for f in manifest["flights"]:
         (data_dir / "flights" / f["id"] / f["original"]).chmod(0o444)
+    for v in manifest.get("videos", []):
+        (data_dir / "flights" / v["flight_id"] / "videos" / v["file"]).chmod(0o444)
 
     rebuilt = 0
     if not manifest.get("include_analysis", True):
@@ -213,7 +265,12 @@ def restore(
     from flightlens.store import Store
 
     Store(data_dir)  # opens and, for an older backup, upgrades the database
-    return {"flights": len(manifest["flights"]), "reanalyzed": rebuilt, "manifest": manifest}
+    return {
+        "flights": len(manifest["flights"]),
+        "videos": len(manifest.get("videos", [])),
+        "reanalyzed": rebuilt,
+        "manifest": manifest,
+    }
 
 
 def _check_database(path: Path) -> None:
@@ -227,6 +284,14 @@ def _check_database(path: Path) -> None:
         if extra is not None:
             raise BackupError(f"the backup's database contains a {extra[0]} ({extra[1]!r})")
         ids = [r[0] for r in db.execute("SELECT id FROM flights")]
+        if db.execute("SELECT 1 FROM sqlite_master WHERE name='videos'").fetchone():
+            for video_id, flight_id, file in db.execute("SELECT id, flight_id, file FROM videos"):
+                if not (
+                    VIDEO_ID.match(str(video_id))
+                    and FLIGHT_ID.match(str(flight_id))
+                    and VIDEO_FILE.match(str(file))
+                ):
+                    raise BackupError(f"the backup's database has an invalid video ({file!r})")
     except sqlite3.DatabaseError as exc:
         raise BackupError(f"the backup's database is unreadable ({exc})") from None
     finally:

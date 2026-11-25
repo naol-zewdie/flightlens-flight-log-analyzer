@@ -43,13 +43,15 @@ def candidates(
     """Flights older than ``older_than_days``, oldest first (never ones being analyzed)."""
     cutoff = (now if now is not None else time.time()) - older_than_days * DAY
     reviewed = store.review_counts() if keep_reviewed else {}
+    video_bytes = store.video_bytes()
     out = []
     for row in store.list_flights():
         if row["status"] in ("queued", "processing") or row["id"] in reviewed:
             continue
         when = flight_time(row)
         if when < cutoff:
-            out.append(Candidate(row["id"], row["filename"], when, int(row["size_bytes"] or 0)))
+            size = int(row["size_bytes"] or 0) + video_bytes.get(row["id"], 0)
+            out.append(Candidate(row["id"], row["filename"], when, size))
     return sorted(out, key=lambda c: c.when)
 
 

@@ -92,6 +92,43 @@ class ReviewBody(BaseModel):
     note: str = ""
 
 
+TEXT_MAX = 5000
+TAG_MAX = 32
+
+
+class NoteBody(BaseModel):
+    t_start: float = Field(ge=0)
+    t_end: float | None = Field(None, ge=0)
+    text: str = Field(min_length=1, max_length=NOTE_MAX)
+    tags: list[Annotated[str, Field(min_length=1, max_length=TAG_MAX)]] = Field(
+        default_factory=list, max_length=12
+    )
+    view: dict[str, Any] | None = None
+    """Camera mode and the like, restored when the note is opened."""
+    author: str | None = Field(None, max_length=80)
+
+
+class NotePatch(BaseModel):
+    t_start: float | None = Field(None, ge=0)
+    t_end: float | None = Field(None, ge=0)
+    text: str | None = Field(None, min_length=1, max_length=NOTE_MAX)
+    tags: list[Annotated[str, Field(min_length=1, max_length=TAG_MAX)]] | None = Field(
+        None, max_length=12
+    )
+    view: dict[str, Any] | None = None
+    author: str | None = Field(None, max_length=80)
+
+
+class DebriefBody(BaseModel):
+    status: Literal["open", "closed"]
+    summary: str = Field("", max_length=TEXT_MAX)
+    conclusion: str = Field("", max_length=TEXT_MAX)
+    actions: list[Annotated[str, Field(min_length=1, max_length=300)]] = Field(
+        default_factory=list, max_length=30
+    )
+    author: str | None = Field(None, max_length=80)
+
+
 class VideoPatch(BaseModel):
     offset_s: float | None = None
     """log time = offset_s + rate * video time; null: not synced"""
@@ -359,14 +396,32 @@ def create_app(
     # --- flights -----------------------------------------------------------------
 
     @app.get("/api/flights")
-    def flights(verdict: str | None = None, q: str | None = None) -> dict[str, Any]:
+    def flights(
+        verdict: str | None = None,
+        q: str | None = None,
+        debrief: Literal["open", "closed", "none", "any"] | None = None,
+    ) -> dict[str, Any]:
+        """Flights, newest first; ``debrief`` filters by debrief status (``any``: has one)."""
         reviewed = store.review_counts()
-        return {
-            "flights": [
-                {**row, "stale": bool(row_stale(row)), "reviewed": reviewed.get(row["id"], 0)}
-                for row in store.list_flights(verdict=verdict, q=q)
-            ]
-        }
+        notes = store.note_counts()
+        debriefs = store.debrief_statuses()
+        rows = [
+            {
+                **row,
+                "stale": bool(row_stale(row)),
+                "reviewed": reviewed.get(row["id"], 0),
+                "notes": notes.get(row["id"], 0),
+                "debrief": debriefs.get(row["id"]),
+            }
+            for row in store.list_flights(verdict=verdict, q=q)
+        ]
+        if debrief == "any":
+            rows = [r for r in rows if r["debrief"]]
+        elif debrief == "none":
+            rows = [r for r in rows if not r["debrief"]]
+        elif debrief:
+            rows = [r for r in rows if r["debrief"] == debrief]
+        return {"flights": rows}
 
     @app.get("/api/flights/{flight_id}")
     def flight(flight_id: str) -> dict[str, Any]:
@@ -612,6 +667,77 @@ def create_app(
         if not store.clear_review(flight_id, key):
             raise HTTPException(404, "No review for this finding")
         return {"deleted": key}
+
+    # --- notes and debrief -----------------------------------------------------------
+
+    def note_or_404(note_id: str) -> dict[str, Any]:
+        note = store.get_note(note_id)
+        if note is None:
+            raise HTTPException(404, "No note with this id")
+        return note
+
+    def check_view(view: dict[str, Any] | None) -> None:
+        if view is not None and len(json.dumps(view)) > 2000:
+            raise HTTPException(422, "The saved view is too large")
+
+    @app.get("/api/flights/{flight_id}/notes")
+    def notes(flight_id: str) -> dict[str, Any]:
+        flight_or_404(flight_id)
+        return {"notes": store.list_notes(flight_id)}
+
+    @app.post("/api/flights/{flight_id}/notes", status_code=201)
+    def add_note(flight_id: str, body: NoteBody) -> dict[str, Any]:
+        """A time-stamped note (a moment, or a range with ``t_end``) about the flight."""
+        flight_or_404(flight_id)
+        if body.t_end is not None and body.t_end < body.t_start:
+            raise HTTPException(422, "t_end is before t_start")
+        check_view(body.view)
+        note = body.model_dump()
+        note["text"] = note["text"].strip()
+        note["tags"] = sorted({t.strip().lower() for t in note["tags"] if t.strip()})
+        return {"note": store.add_note(flight_id, note)}
+
+    @app.patch("/api/notes/{note_id}")
+    def patch_note(note_id: str, body: NotePatch) -> dict[str, Any]:
+        note = note_or_404(note_id)
+        changes = body.model_dump(exclude_unset=True)
+        start = changes.get("t_start", note["t_start"])
+        end = changes.get("t_end", note["t_end"])
+        if start is None:
+            raise HTTPException(422, "t_start cannot be removed")
+        if end is not None and end < start:
+            raise HTTPException(422, "t_end is before t_start")
+        check_view(changes.get("view"))
+        if "text" in changes:
+            if changes["text"] is None or not changes["text"].strip():
+                raise HTTPException(422, "A note needs text")
+            changes["text"] = changes["text"].strip()
+        if "tags" in changes:
+            changes["tags"] = sorted(
+                {t.strip().lower() for t in changes["tags"] or [] if t.strip()}
+            )
+        return {"note": store.update_note(note_id, changes)}
+
+    @app.delete("/api/notes/{note_id}")
+    def delete_note(note_id: str) -> dict[str, Any]:
+        note_or_404(note_id)
+        store.delete_note(note_id)
+        return {"deleted": note_id}
+
+    @app.get("/api/flights/{flight_id}/debrief")
+    def debrief(flight_id: str) -> dict[str, Any]:
+        flight_or_404(flight_id)
+        return {"debrief": store.get_debrief(flight_id)}
+
+    @app.put("/api/flights/{flight_id}/debrief")
+    def put_debrief(flight_id: str, body: DebriefBody) -> dict[str, Any]:
+        """The flight's debrief: status (open or closed), summary, conclusion, actions."""
+        flight_or_404(flight_id)
+        d = body.model_dump()
+        d["summary"] = d["summary"].strip() or None
+        d["conclusion"] = d["conclusion"].strip() or None
+        d["actions"] = [a.strip() for a in d["actions"] if a.strip()]
+        return {"debrief": store.put_debrief(flight_id, d)}
 
     @app.get("/api/reviews")
     def reviews() -> dict[str, Any]:

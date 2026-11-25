@@ -46,6 +46,13 @@ def safe_suffix(filename: str) -> str:
     return suffix if suffix in KNOWN_SUFFIXES else ".log"
 
 
+def _note_out(row: Any) -> dict[str, Any]:
+    n = dict(row)
+    n["tags"] = json.loads(n["tags"]) if n.get("tags") else []
+    n["view"] = json.loads(n["view"]) if n.get("view") else None
+    return n
+
+
 def _video_out(row: Any) -> dict[str, Any]:
     v = dict(row)
     v["sync_points"] = json.loads(v["sync_points"]) if v.get("sync_points") else []
@@ -478,6 +485,116 @@ class Store:
                 "SELECT flight_id, coalesce(sum(size_bytes), 0) FROM videos GROUP BY flight_id"
             ).fetchall()
         return {r[0]: int(r[1]) for r in rows}
+
+    # --- notes and debriefs ----------------------------------------------------
+
+    NOTE_FIELDS = ("t_start", "t_end", "text", "tags", "view", "author")
+
+    def add_note(self, flight_id: str, note: dict[str, Any]) -> dict[str, Any]:
+        note_id = uuid.uuid4().hex[:16]
+        now = time.time()
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO notes (id, flight_id, t_start, t_end, text, tags, view, author, "
+                "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (
+                    note_id,
+                    flight_id,
+                    note["t_start"],
+                    note.get("t_end"),
+                    note["text"],
+                    json.dumps(note.get("tags") or []),
+                    json.dumps(note["view"]) if note.get("view") is not None else None,
+                    note.get("author"),
+                    now,
+                    now,
+                ),
+            )
+            self._db.commit()
+        out = self.get_note(note_id)
+        assert out is not None
+        return out
+
+    def get_note(self, note_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            r = self._db.execute("SELECT * FROM notes WHERE id=?", (note_id,)).fetchone()
+        return _note_out(r) if r else None
+
+    def list_notes(self, flight_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM notes WHERE flight_id=? ORDER BY t_start, created_at", (flight_id,)
+            ).fetchall()
+        return [_note_out(r) for r in rows]
+
+    def update_note(self, note_id: str, changes: dict[str, Any]) -> dict[str, Any] | None:
+        bad = set(changes) - set(self.NOTE_FIELDS)
+        if bad:
+            raise ValueError(f"cannot change {', '.join(sorted(bad))}")
+        values = [
+            json.dumps(v) if k in ("tags", "view") and v is not None else v
+            for k, v in changes.items()
+        ]
+        sets = ", ".join(f"{k}=?" for k in changes)
+        with self._lock:
+            self._db.execute(
+                f"UPDATE notes SET {sets}{', ' if sets else ''}updated_at=? WHERE id=?",
+                (*values, time.time(), note_id),
+            )
+            self._db.commit()
+        return self.get_note(note_id)
+
+    def delete_note(self, note_id: str) -> bool:
+        with self._lock:
+            cur = self._db.execute("DELETE FROM notes WHERE id=?", (note_id,))
+            self._db.commit()
+        return cur.rowcount > 0
+
+    def note_counts(self) -> dict[str, int]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT flight_id, COUNT(*) FROM notes GROUP BY flight_id"
+            ).fetchall()
+        return {r[0]: r[1] for r in rows}
+
+    def get_debrief(self, flight_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            r = self._db.execute(
+                "SELECT * FROM debriefs WHERE flight_id=?", (flight_id,)
+            ).fetchone()
+        if r is None:
+            return None
+        d = dict(r)
+        d["actions"] = json.loads(d["actions"]) if d.get("actions") else []
+        return d
+
+    def put_debrief(self, flight_id: str, debrief: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO debriefs (flight_id, status, summary, conclusion, actions, author, "
+                "updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(flight_id) DO UPDATE SET "
+                "status=excluded.status, summary=excluded.summary, "
+                "conclusion=excluded.conclusion, actions=excluded.actions, "
+                "author=excluded.author, updated_at=excluded.updated_at",
+                (
+                    flight_id,
+                    debrief["status"],
+                    debrief.get("summary"),
+                    debrief.get("conclusion"),
+                    json.dumps(debrief.get("actions") or []),
+                    debrief.get("author"),
+                    time.time(),
+                ),
+            )
+            self._db.commit()
+        out = self.get_debrief(flight_id)
+        assert out is not None
+        return out
+
+    def debrief_statuses(self) -> dict[str, str]:
+        with self._lock:
+            rows = self._db.execute("SELECT flight_id, status FROM debriefs").fetchall()
+        return {r[0]: r[1] for r in rows}
 
     # --- threshold profiles ----------------------------------------------------
 

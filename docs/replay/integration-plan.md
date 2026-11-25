@@ -196,15 +196,16 @@ frontend tasks.
 
 ### 1.4 Incident mode and compare (branch `feature/incident`)
 
-- [ ] **Incident mode.** From a `flight.crash` or Problem finding: open the replay 60 s before, list the finding's `related` causes in time order (built by `engine._link_causes`), loop the critical window, and pre-fill a debrief.
-- [ ] **Replay compare.** Two flights in one scene with synced charts, aligned at take-off (as `pages/Compare.tsx` does) or at a chosen event.
-- [ ] **Real-log validation.** Replay the real ArduPlane crash logs and a few public PX4 logs; check the crash moment, attitude and path by eye; record the results in `docs/real-log-results.md`.
+- [x] **Incident mode.** From a `flight.crash` or Problem finding: open the replay 60 s before, list the finding's `related` causes in time order (built by `engine._link_causes`), loop the critical window, and pre-fill a debrief.
+- [x] **Replay compare.** Two flights in one scene with synced charts, aligned at take-off (as `pages/Compare.tsx` does) or at a chosen event.
+- [x] **Real-log validation.** Replay the real ArduPlane crash logs and a few public PX4 logs; check the crash moment, attitude and path by eye; record the results in `docs/real-log-results.md`.
 
 **Gate 1.4:**
 
-- [ ] incident mode opens 60 s before the crash or problem and lists the related causes in order
-- [ ] two flights replay together, aligned at take-off or a chosen event
-- [ ] validated on the real crash logs and documented; tag `v1.4.0`
+- [x] incident mode opens 60 s before the crash or problem and lists the related causes in order
+- [x] two flights replay together, aligned at take-off or a chosen event
+- [x] validated on the real crash logs and documented
+- [ ] tag: part of the final release (below)
 
 ### Final release and deployment
 
@@ -385,6 +386,10 @@ video offset, so they get the most tests.
   (gzip-compressed float32 columns, decoded with `Float32Array`) next to the
   JSON metadata at `/replay`: columnar JSON would be several times the 5 MB
   budget for a 1-hour flight; the binary table is about 3 MB.
+- 2026-11-25 (1.4 build): each flight in the two-flight replay is drawn from
+  its own take-off point (different fields overlay), aligned in time at
+  take-off, arming, log start, or a mode change or event chosen per flight.
+  Incident mode loops 15 s before to 5 s after the finding.
 - 2026-11-25: one final release after 1.4 instead of one per release; a
   read-only public demo on Vercel plus the full app from the Docker image on
   a container host (section 5, Final release and deployment).

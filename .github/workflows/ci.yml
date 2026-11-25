@@ -56,6 +56,7 @@ jobs:
           python-version: "3.13"
       - run: uv sync
       - run: uv run playwright install --with-deps chromium
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg  # test videos
       - run: uv run pytest tests/test_e2e_replay.py
 
   audit:

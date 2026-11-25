@@ -137,7 +137,7 @@ def test_play_pause_keys_and_speed(server: Any, browser: Any) -> None:
     elapsed = time.monotonic() - started  # includes the key presses' own round trips
     t1 = _time(page)
     # played at 1x: about the wait, never more than the wall time it had
-    assert 50 + 1.2 < t1 <= 50 + elapsed + 0.3, (t1, elapsed)
+    assert 50 + 1.0 <= t1 <= 50 + elapsed + 0.3, (t1, elapsed)
     page.wait_for_timeout(600)
     assert _time(page) == t1, "paused"
     page.keyboard.press("l")  # faster

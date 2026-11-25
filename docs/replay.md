@@ -110,6 +110,35 @@ Every event and finding in time order, with the finding's review status if an
 engineer reviewed it. Click one to jump there (findings: a few seconds
 before). The current one is highlighted as the replay passes it.
 
+## Video
+
+Attach the flight's video (onboard camera, or a recording from the ground)
+in the **Video** panel; several per flight are fine, and you choose which one
+is shown.
+
+- **Formats:** MP4 (H.264) and WebM, the formats browsers play. Anything else
+  is refused with a conversion command, for example
+  `ffmpeg -i input.mov -c:v libx264 -c:a aac output.mp4`. The limit is 4 GB.
+- **The original is kept as uploaded**, read-only, with its SHA-256, like the
+  log. Removing a video deletes the file.
+- **Sync once.** One number links the two clocks: *log time = offset + rate ×
+  video time*. Press **Sync…**:
+    - find a sharp moment in both (take-off, a quick turn, landing), put the
+      video on it (its own controls, or **◀ frame / frame ▶**) and the replay
+      on it (timeline, arrow keys), and press **Add sync point here**. One
+      point sets the offset; two or more, far apart, also correct a camera
+      clock that runs fast or slow. Each point shows how far it is from the
+      fit, and points that cannot belong together are flagged;
+    - or nudge the offset by ±1 s, ±0.1 s or one frame until they match;
+    - or start from the **camera's clock** (the time written into the file),
+      offered as a first guess: cameras are often seconds off.
+  The panel always says how the video was synced and how closely.
+- **Then it follows the replay:** it plays at the replay's speed, is corrected
+  whenever it drifts more than 0.1 s from the clock, and seeks with the
+  timeline. Before or after the recording the panel says *No video at this
+  time*; the timeline shows which part of the flight has video (a bar under
+  the strip). Sound is off until you turn it on.
+
 ## Controls
 
 | Action | Mouse | Keyboard |
@@ -165,7 +194,7 @@ an onboard log; the HUD shows the real rate.
 ## Read-only and offline
 
 - Replay works on a read-only server (`flightlens serve --read-only`), such as
-  a public demo.
+  a public demo; videos play there too, but cannot be added, synced or removed.
 - It needs no network: no maps, fonts or scripts are loaded from anywhere
   else.
 

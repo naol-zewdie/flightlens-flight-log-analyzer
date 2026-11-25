@@ -116,6 +116,18 @@ def replay_section(folder: Path) -> str:
         f"| `{name}` | {m:.1f} | {hz:g} Hz | {sec * 1000:.0f} ms | {mb:.1f} MB |"
         for name, m, hz, sec, mb in rows
     ]
+    out += [
+        "",
+        "### Video sync",
+        "",
+        "Checked in a real browser by `tests/test_e2e_replay.py` with a generated video of",
+        "the scripted flight that starts 12.3 s into the log, runs on a camera clock 0.1%",
+        "fast, and flashes white for 0.2 s at three known moments. After a two-point sync",
+        "(first and last flash), the replay paused inside the unmarked middle flash shows",
+        "a white frame (50 ms and 150 ms into it) and a black frame 100 ms before and",
+        "300 ms after it, so video and log agree to better than 100 ms; while playing,",
+        "the video follows the clock.",
+    ]
     return "\n".join(out) + "\n"
 
 

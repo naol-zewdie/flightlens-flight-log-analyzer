@@ -93,7 +93,8 @@ export function syncLabel(v: Video): string {
     case "points": {
       const fit = fitSync(v.sync_points);
       const n = v.sync_points.length;
-      const acc = fit && n > 1 ? `, ±${Math.round(fit.rms * 1000)} ms between them` : "";
+      // two points always fit exactly: only a third shows how well they agree
+      const acc = fit && n > 2 ? `, ±${Math.round(fit.rms * 1000)} ms between them` : n === 2 ? " (add a third to check them)" : "";
       const drift = Math.abs(v.rate - 1) > 1e-6 ? `, clock ${((v.rate - 1) * 100).toFixed(2)}% fast/slow corrected` : "";
       return `Synced from ${n} point${n === 1 ? "" : "s"}${acc}${drift}`;
     }

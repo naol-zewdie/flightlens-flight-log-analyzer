@@ -46,6 +46,8 @@ describe("video clock", () => {
     expect(syncLabel(base)).toBe("Not synced yet");
     expect(syncLabel({ ...base, sync_method: "metadata", offset_s: 3 })).toMatch(/Guessed/);
     const v = { ...base, sync_method: "points" as const, offset_s: 7.3, rate: 1.001, sync_points: [[5, 12.305], [55, 62.355]] as [number, number][] };
-    expect(syncLabel(v)).toMatch(/^Synced from 2 points, ±0 ms between them, clock 0.10%/);
+    expect(syncLabel(v)).toMatch(/^Synced from 2 points \(add a third to check them\), clock 0.10%/);
+    const three = { ...v, sync_points: [...v.sync_points, [30, 37.33]] as [number, number][] };
+    expect(syncLabel(three)).toMatch(/^Synced from 3 points, ±\d+ ms between them/);
   });
 });

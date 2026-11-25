@@ -46,14 +46,19 @@ export function createClock(start: number, end: number, time = start): Clock {
   };
 
   const frame = (now: number) => {
-    // Real time even at a low frame rate; but a gap over 1 s means the tab was in
-    // the background, and the replay must not jump ahead when it comes back.
-    let dt = last ? (now - last) / 1000 : 0;
-    if (dt > 1) dt = 0;
+    // Real time, however slow the frames come (a busy machine must not play the
+    // flight slower). Only a hidden tab pauses the clock: see onVisible.
+    const dt = last ? (now - last) / 1000 : 0;
     last = now;
     clock.tick(dt);
     raf = s.playing ? requestAnimationFrame(frame) : 0;
   };
+  // The browser stops animation frames in a background tab; when the tab comes
+  // back, the replay continues from where it was instead of jumping ahead.
+  const onVisible = () => {
+    last = 0;
+  };
+  if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible);
   const startLoop = () => {
     if (!raf && typeof requestAnimationFrame !== "undefined") {
       last = 0;
@@ -104,6 +109,7 @@ export function createClock(start: number, end: number, time = start): Clock {
       }
     },
     dispose() {
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible);
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
       listeners.clear();

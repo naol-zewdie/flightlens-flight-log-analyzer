@@ -6,6 +6,29 @@ All notable changes to FlightLens. The format follows
 `flightlens checks` and stored in every report) changes whenever its logic or
 thresholds do.
 
+## [1.2.0] - unreleased
+
+### Added
+- **Video** in the Replay tab (`docs/replay.md`): attach MP4 or WebM videos
+  to a flight (up to 4 GB, several per flight, stored as uploaded with their
+  SHA-256), sync once (sync points with a fitted offset and camera-clock
+  drift, nudges by 1 s / 0.1 s / one frame, the camera's clock as a first
+  guess), then the video follows the replay: speed, pause, scrubbing, drift
+  corrected over 0.1 s; the timeline shows the part of the flight with video.
+- `POST/GET /api/flights/{id}/videos`, `GET /api/videos/{id}/file` (HTTP
+  Range), `PATCH`, `DELETE`; database schema 6.
+- Backups include videos (format 2; `--no-video` leaves them out); prune
+  counts their size.
+- Validated with a generated video (offset 12.3 s, camera clock 0.1% fast):
+  after a two-point sync an unmarked flash shows exactly inside its 0.2 s.
+
+### Fixed
+- The replay's time readout rounded up to the next second (40.7 s showed
+  as 00:41.7).
+- On a busy machine the replay played slower than real time: frame gaps over
+  1 s were dropped as if the tab were hidden. A hidden tab is now detected
+  directly (Page Visibility API).
+
 ## [1.1.0] - 2026-11-24
 
 The first public release. FlightLens reads PX4 `.ulg`, ArduPilot `.bin` and

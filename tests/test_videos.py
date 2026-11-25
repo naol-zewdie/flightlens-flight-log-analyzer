@@ -45,7 +45,8 @@ def library(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def client(library: Path, tmp_path: Path) -> Iterator[TestClient]:
     data = tmp_path / "data"
     shutil.copytree(library, data)
-    with TestClient(create_app(data, max_video_bytes=2 * 1024**2), base_url="http://localhost") as c:
+    app = create_app(data, max_video_bytes=2 * 1024**2)
+    with TestClient(app, base_url="http://localhost") as c:
         yield c
 
 

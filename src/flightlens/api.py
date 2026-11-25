@@ -20,16 +20,16 @@ import uuid
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import quote, urlsplit
 
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from flightlens import __version__, fleet, parsers
+from flightlens import __version__, fleet, media, parsers
 from flightlens.checks import all_checks
 from flightlens.htmlreport import render_html
 from flightlens.lttb import lttb, with_gaps
@@ -48,6 +48,13 @@ from flightlens.worker import (
 )
 
 MAX_UPLOAD_BYTES = 1024**3  # 1 GB, from the spec
+MAX_VIDEO_BYTES = 4 * 1024**3
+"""Default limit for one video; ``create_app(max_video_bytes=...)`` changes it."""
+UPLOAD_ROUTES = (
+    (re.compile(r"^/api/logs$"), "log"),
+    (re.compile(r"^/api/flights/[^/]+/videos$"), "video"),
+)
+"""POST routes that receive a file: their size is checked before the body is read."""
 MULTIPART_OVERHEAD = 1 << 20
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
 CHUNK = 1 << 20
@@ -85,6 +92,18 @@ class ReviewBody(BaseModel):
     note: str = ""
 
 
+class VideoPatch(BaseModel):
+    offset_s: float | None = None
+    """log time = offset_s + rate * video time; null: not synced"""
+    rate: float = Field(1.0, gt=0.9, lt=1.1)
+    """Clock-rate correction from two or more sync points (1.0 = none)."""
+    sync_method: Literal["none", "metadata", "manual", "points"] = "none"
+    sync_points: list[tuple[float, float]] = Field(default_factory=list, max_length=50)
+    label: str | None = Field(None, max_length=200)
+    duration_s: float | None = Field(None, gt=0)
+    """Reported by the browser when the server could not read it."""
+
+
 class AssignBody(BaseModel):
     profile: str | None
     """Profile name, or null for the checks' defaults."""
@@ -104,6 +123,7 @@ def create_app(
     max_queue: int = DEFAULT_MAX_QUEUE,
     shutdown_grace_s: float = SHUTDOWN_GRACE_S,
     min_free_bytes: int = MIN_FREE_BYTES,
+    max_video_bytes: int = MAX_VIDEO_BYTES,
 ) -> FastAPI:
     """Build the app.
 
@@ -156,11 +176,11 @@ def create_app(
     app.state.runner = runner
     app.state.metrics = metrics
 
-    def upload_refusal(length: int) -> tuple[int, str, dict[str, str]] | None:
+    def upload_refusal(length: int, kind: str = "log") -> tuple[int, str, dict[str, str]] | None:
         """Why an upload of ``length`` bytes cannot be taken now (checked before the
         body is read, so a refused upload never reaches the disk)."""
         refusal = None
-        if runner.full():
+        if kind == "log" and runner.full():
             refusal = (
                 503,
                 f"The analysis queue is full ({runner.pending()} logs waiting); try again shortly",
@@ -177,6 +197,7 @@ def create_app(
         allowed_hosts=tuple(h.lower() for h in allowed_hosts),
         read_only=read_only,
         upload_refusal=upload_refusal,
+        limits={"log": MAX_UPLOAD_BYTES, "video": max_video_bytes},
     )
     app.add_middleware(ObservedRequests, metrics=metrics)  # outermost: sees refusals too
 
@@ -664,6 +685,95 @@ def create_app(
         report_or_409(flight_id)
         return {"spectrum": store.read_spectrum(flight_id)}
 
+    # --- videos ------------------------------------------------------------------
+
+    def video_or_404(video_id: str) -> dict[str, Any]:
+        video = store.get_video(video_id)
+        if video is None:
+            raise HTTPException(404, "No video with this id")
+        return video
+
+    @app.post("/api/flights/{flight_id}/videos", status_code=201)
+    def upload_video(flight_id: str, file: Annotated[UploadFile, File()]) -> dict[str, Any]:
+        """Attach a video (MP4 or WebM) to a flight. Stored as uploaded, with its SHA-256."""
+        flight_or_404(flight_id)
+        if disk_free() < min_free_bytes:
+            raise HTTPException(507, "The server is low on disk space; uploads are paused")
+        filename = Path(file.filename or "video").name[:200]
+        tmp = store.root / "uploads" / f"{uuid.uuid4().hex}.video.part"
+        digest = hashlib.sha256()
+        size = 0
+        try:
+            with tmp.open("wb") as fh:
+                while chunk := file.file.read(CHUNK):
+                    size += len(chunk)
+                    if size > max_video_bytes:
+                        raise HTTPException(
+                            413, f"The video is larger than the {_size(max_video_bytes)} limit"
+                        )
+                    digest.update(chunk)
+                    fh.write(chunk)
+            if size == 0:
+                raise HTTPException(400, "The file is empty")
+            try:
+                ext = media.sniff(tmp)
+            except media.MediaError as exc:
+                raise HTTPException(415, str(exc)) from None
+            sha = digest.hexdigest()
+            existing = next((v for v in store.list_videos(flight_id) if v["sha256"] == sha), None)
+            if existing is not None:
+                return {"video": existing, "duplicate": True}
+            info = media.probe(tmp)
+            video_id = uuid.uuid4().hex[:16]
+            folder = store.videos_dir(flight_id)
+            folder.mkdir(parents=True, exist_ok=True)
+            dest = folder / f"{video_id}.{ext}"
+            shutil.move(str(tmp), dest)
+            dest.chmod(0o444)  # the original is evidence, like the log
+            row = {
+                "id": video_id,
+                "filename": filename,
+                "file": dest.name,
+                "sha256": sha,
+                "size_bytes": size,
+                **info.as_row(),
+                "uploaded_at": time.time(),
+            }
+            video = store.add_video(flight_id, row)
+            return {"video": video, "duplicate": False, "browser_codec": _playable(info.codec)}
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    @app.get("/api/flights/{flight_id}/videos")
+    def videos(flight_id: str) -> dict[str, Any]:
+        flight_or_404(flight_id)
+        return {"videos": store.list_videos(flight_id)}
+
+    @app.get("/api/videos/{video_id}/file")
+    def video_file(video_id: str) -> FileResponse:
+        """The video as uploaded; answers HTTP Range requests, so the player can seek."""
+        video = video_or_404(video_id)
+        path = store.video_path(video)
+        if not path.is_file():
+            raise HTTPException(404, "The video file is missing")
+        ext = path.suffix.lstrip(".")
+        return FileResponse(path, media_type=media.MEDIA_TYPES.get(ext, "application/octet-stream"))
+
+    @app.patch("/api/videos/{video_id}")
+    def patch_video(video_id: str, body: VideoPatch) -> dict[str, Any]:
+        """Sync settings (offset, rate, method, points), label, or the duration the browser read."""
+        video_or_404(video_id)
+        changes = body.model_dump(exclude_unset=True)
+        if "sync_points" in changes:
+            changes["sync_points"] = [list(p) for p in changes["sync_points"]]
+        return {"video": store.update_video(video_id, changes)}
+
+    @app.delete("/api/videos/{video_id}")
+    def delete_video(video_id: str) -> dict[str, Any]:
+        video_or_404(video_id)
+        store.delete_video(video_id)
+        return {"deleted": video_id}
+
     def replay_or_409(flight_id: str) -> dict[str, Any]:
         report_or_409(flight_id)
         meta = store.read_replay_meta(flight_id)
@@ -903,11 +1013,13 @@ class RequestGuard:
         allowed_hosts: tuple[str, ...],
         read_only: bool = False,
         upload_refusal: Any = None,
+        limits: dict[str, int] | None = None,
     ) -> None:
         self.app = app
         self.allowed_hosts = allowed_hosts
         self.read_only = read_only
         self.upload_refusal = upload_refusal
+        self.limits = limits or {"log": MAX_UPLOAD_BYTES, "video": MAX_VIDEO_BYTES}
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] != "http":
@@ -928,22 +1040,36 @@ class RequestGuard:
                 await _reject(send, 403, "Cross-site requests are not allowed")
                 return
 
-        if scope["method"] == "POST" and scope["path"] == "/api/logs":
+        kind = next(
+            (k for rx, k in UPLOAD_ROUTES if scope["method"] == "POST" and rx.match(scope["path"])),
+            None,
+        )
+        if kind is not None:
             try:
                 length = int(headers["content-length"])
             except (KeyError, ValueError):
                 await _reject(send, 411, "The upload must declare its size (Content-Length)")
                 return
-            if length > MAX_UPLOAD_BYTES + MULTIPART_OVERHEAD:
-                await _reject(send, 413, "The file is larger than the 1 GB limit")
+            limit = self.limits[kind]
+            if length > limit + MULTIPART_OVERHEAD:
+                await _reject(send, 413, f"The file is larger than the {_size(limit)} limit")
                 return
-            refusal = self.upload_refusal(length) if self.upload_refusal else None
+            refusal = self.upload_refusal(length, kind) if self.upload_refusal else None
             if refusal is not None:
                 await _reject(send, refusal[0], refusal[1], refusal[2])
                 return
             receive = _limited(receive, length)
 
         await self.app(scope, receive, send)
+
+
+def _playable(codec: str | None) -> bool | None:
+    """Whether every common browser plays this codec (None: unknown without ffprobe)."""
+    return None if codec is None else codec in media.BROWSER_CODECS
+
+
+def _size(n: int) -> str:
+    return f"{n / 1024**3:.3g} GB" if n >= 1024**3 else f"{n / 1024**2:.3g} MB"
 
 
 def _hostname(host: str) -> str:

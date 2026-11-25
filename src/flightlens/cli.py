@@ -393,7 +393,10 @@ def prune_cmd(
     ] = False,
     include_reviewed: Annotated[
         bool,
-        typer.Option("--include-reviewed", help="Also remove flights an engineer has reviewed."),
+        typer.Option(
+            "--include-reviewed",
+            help="Also remove flights an engineer has reviewed, annotated or debriefed.",
+        ),
     ] = False,
 ) -> None:
     """Remove old flights from the library (lists them first; deletes only with --yes)."""

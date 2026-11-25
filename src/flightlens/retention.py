@@ -3,7 +3,7 @@
 Nothing is removed automatically. ``flightlens prune --older-than DAYS`` lists
 the flights older than that (by the flight's own date when the log has one,
 else by when it was uploaded) and deletes them only with ``--yes``. Flights an
-engineer has reviewed are kept by default: reviews are evidence, and they are
+engineer has reviewed, annotated or debriefed are kept by default: that work is evidence, and it is
 the regression labels ``flightlens validate`` runs on.
 """
 
@@ -42,7 +42,12 @@ def candidates(
 ) -> list[Candidate]:
     """Flights older than ``older_than_days``, oldest first (never ones being analyzed)."""
     cutoff = (now if now is not None else time.time()) - older_than_days * DAY
-    reviewed = store.review_counts() if keep_reviewed else {}
+    # an engineer's work on a flight (reviews, notes, a debrief) keeps it
+    reviewed: set[str] = set()
+    if keep_reviewed:
+        reviewed = (
+            set(store.review_counts()) | set(store.note_counts()) | set(store.debrief_statuses())
+        )
     video_bytes = store.video_bytes()
     out = []
     for row in store.list_flights():

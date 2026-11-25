@@ -12,9 +12,11 @@ import { SpectrumView } from "./pages/SpectrumView";
 import { TuningView } from "./pages/TuningView";
 import { EventsView } from "./pages/EventsView";
 import { QualityView } from "./pages/QualityView";
+import { DebriefView } from "./pages/DebriefView";
 
 // three.js only downloads when someone opens a replay
 const ReplayView = lazy(() => import("./replay/ReplayView"));
+const CompareReplay = lazy(() => import("./replay/CompareReplay"));
 
 export function App() {
   return (
@@ -25,9 +27,11 @@ export function App() {
         <Route path="/aircraft" element={<AircraftList />} />
         <Route path="/aircraft/:key" element={<AircraftPage />} />
         <Route path="/compare" element={<Compare />} />
+        <Route path="/compare/replay" element={<Suspense fallback={<div className="empty">Loading…</div>}><CompareReplay /></Suspense>} />
         <Route path="/flights/:id" element={<FlightPage />}>
           <Route index element={<Overview />} />
           <Route path="replay" element={<Suspense fallback={<div className="empty">Loading the replay…</div>}><ReplayView /></Suspense>} />
+          <Route path="debrief" element={<DebriefView />} />
           <Route path="signals" element={<SignalsView />} />
           <Route path="tuning" element={<TuningView />} />
           <Route path="spectrum" element={<SpectrumView />} />

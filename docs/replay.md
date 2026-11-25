@@ -139,6 +139,30 @@ is shown.
   time*; the timeline shows which part of the flight has video (a bar under
   the strip). Sound is off until you turn it on.
 
+## Incident mode
+
+On a crash or a Problem finding, **Investigate** (Overview tab) opens the
+replay a minute before it, loops the critical window (15 s before to 5 s
+after) and shows the incident with the likely causes FlightLens linked to it,
+in time order: click one to see it. **Start a debrief** opens the
+[Debrief](debrief.md) tab with the incident and its causes already written in.
+
+## Two flights together
+
+On the **Compare** page, **Replay both in 3D** puts the two flights in one
+scene on one clock: flight A solid, flight B dashed, each drawn from its own
+take-off point, so two flights of the same route overlay even from different
+fields. Choose for each flight the moment that becomes t = 0: take-off
+(default), arming, the log start, or any mode change or event. The cameras
+are orbit, top, chase A and chase B; a table compares height, speed,
+attitude, heading and mode at the same aligned time, and the charts overlay
+roll, height and battery.
+
+## Notes
+
+Press **N** to write a note at the current moment; see
+[Notes and debrief](debrief.md).
+
 ## Controls
 
 | Action | Mouse | Keyboard |
@@ -151,6 +175,7 @@ is shown.
 | Go to start / end | | Home / End |
 | Loop a range | Shift-drag the timeline | |
 | Camera | buttons | 1 – 4 |
+| Write a note here | Note button | N |
 
 Playback stops at the end of the log, or loops the selected range. Every
 control can be reached with the keyboard and has a label for screen readers.

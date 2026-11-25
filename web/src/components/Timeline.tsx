@@ -15,6 +15,8 @@ interface Props {
   gaps?: [number, number][];
   /** Ranges with video, drawn as a bar under the strip */
   coverage?: [number, number][];
+  /** Notes, drawn as markers (and their range) */
+  notes?: { t_start: number; t_end: number | null; text: string }[];
 }
 
 const TICK: Partial<Record<FlightEvent["kind"], string>> = {
@@ -26,7 +28,7 @@ const TICK: Partial<Record<FlightEvent["kind"], string>> = {
 
 /** Mode bands, event ticks and finding windows on one strip. Click or drag
  *  to move the shared time cursor; arrow keys step 1 s (Shift: 10 s). */
-export function Timeline({ duration, events, findings, cursor, onPick, loop, onLoop, gaps, coverage }: Props) {
+export function Timeline({ duration, events, findings, cursor, onPick, loop, onLoop, gaps, coverage, notes }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const loopFrom = useRef<number | null>(null);
   const D = Math.max(duration, 1);
@@ -119,6 +121,10 @@ export function Timeline({ duration, events, findings, cursor, onPick, loop, onL
       {(coverage ?? []).map(([a, b], i) => (
         <div key={`v${i}`} className="video-coverage" title={`Video ${fmtTime(a)}–${fmtTime(b)}`}
           style={{ left: pct(Math.max(0, a)), width: `max(2px, calc(${pct(Math.min(D, b))} - ${pct(Math.max(0, a))}))` }} />
+      ))}
+      {(notes ?? []).map((n, i) => (
+        <div key={`n${i}`} className="note-mark" title={`${fmtTime(n.t_start)} · ${n.text}`}
+          style={{ left: pct(n.t_start), width: n.t_end != null ? `max(8px, calc(${pct(n.t_end)} - ${pct(n.t_start)}))` : undefined }} />
       ))}
       {loop && (
         <div className="loop" title={`Looping ${fmtTime(loop[0])}–${fmtTime(loop[1])}`}

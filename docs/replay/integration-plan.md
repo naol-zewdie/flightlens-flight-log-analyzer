@@ -178,32 +178,66 @@ frontend tasks.
 
 ### 1.3 Debrief (branch `feature/debrief`)
 
-- [ ] **Migration 7.** `notes` and `debriefs` tables. *Accept:* migrating a copy of a real library from 6 to 7 keeps every row.
-- [ ] **Notes API.** `GET/POST /api/flights/{id}/notes`, `PATCH/DELETE /api/notes/{note_id}`; text and tag limits like `reviews.NOTE_MAX`. *Accept:* `tests/test_notes_debrief.py`: CRUD, cross-site and host checks, read-only refusal, cascade on flight delete.
-- [ ] **Notes panel.** `components/NotesPanel.tsx` (*new*): add with N at the cursor, range by shift-drag, starter tags plus free tags; each note stores the camera view and restores it; markers on the timeline and the 3D path; edit and delete inline.
-- [ ] **Debrief.** `GET/PUT /api/flights/{id}/debrief`; `pages/DebriefView.tsx` (*new*): status (open/closed), summary, conclusion, actions, author (a free-text name remembered by the browser); a "Debriefed" badge and filter in `Library.tsx`; a column on the Aircraft page.
-- [ ] **Debrief report.** `debrief.py` (*new*) and `templates/debrief.html.j2` (*new*), in the style of `htmlreport.py`: flight facts and verdict; debrief text; one chronological timeline of modes, events, findings (with review status) and notes; a server-side SVG track with note and finding locations; provenance (FlightLens version, log and video SHA-256, sync method). Optional view snapshots captured in the browser. `GET /api/flights/{id}/debrief.html`. *Accept:* prints cleanly; CSP like the health report.
-- [ ] **Prune and backup.** Notes and debriefs always in backups; flights with notes or a debrief are kept by `prune`.
+- [x] **Migration 7.** `notes` and `debriefs` tables. *Accept:* migrating a copy of a real library from 6 to 7 keeps every row.
+- [x] **Notes API.** `GET/POST /api/flights/{id}/notes`, `PATCH/DELETE /api/notes/{note_id}`; text and tag limits like `reviews.NOTE_MAX`. *Accept:* `tests/test_notes_debrief.py`: CRUD, cross-site and host checks, read-only refusal, cascade on flight delete.
+- [x] **Notes panel.** `components/NotesPanel.tsx` (*new*): add with N at the cursor, range by shift-drag, starter tags plus free tags; each note stores the camera view and restores it; markers on the timeline and the 3D path; edit and delete inline.
+- [x] **Debrief.** `GET/PUT /api/flights/{id}/debrief`; `pages/DebriefView.tsx` (*new*): status (open/closed), summary, conclusion, actions, author (a free-text name remembered by the browser); a "Debriefed" badge and filter in `Library.tsx`; a column on the Aircraft page.
+- [x] **Debrief report.** `debrief.py` (*new*) and `templates/debrief.html.j2` (*new*), in the style of `htmlreport.py`: flight facts and verdict; debrief text; one chronological timeline of modes, events, findings (with review status) and notes; a server-side SVG track with note and finding locations; provenance (FlightLens version, log and video SHA-256, sync method). Optional view snapshots captured in the browser. `GET /api/flights/{id}/debrief.html`. *Accept:* prints cleanly; CSP like the health report.
+- [x] **Prune and backup.** Notes and debriefs always in backups; flights with notes or a debrief are kept by `prune`.
 
 **Gate 1.3:**
 
-- [ ] migration 7 tested on a real library copy
-- [ ] notes: add, range, tags, edit, delete, restore view; markers on the timeline and path
-- [ ] debrief summary and status; Library badge and filter; prune keeps debriefed flights
-- [ ] `debrief.html` prints with provenance; read-only mode blocks every note and debrief edit
-- [ ] full suite and real-log validation pass; tag `v1.3.0`
+- [x] migration 7 tested on a real library copy
+- [x] notes: add, range, tags, edit, delete, restore view; markers on the timeline and path
+- [x] debrief summary and status; Library badge and filter; prune keeps debriefed flights
+- [x] `debrief.html` prints with provenance; read-only mode blocks every note and debrief edit
+- [x] full suite and real-log validation pass
+- [ ] tag `v1.3.0`
 
 ### 1.4 Incident mode and compare (branch `feature/incident`)
 
-- [ ] **Incident mode.** From a `flight.crash` or Problem finding: open the replay 60 s before, list the finding's `related` causes in time order (built by `engine._link_causes`), loop the critical window, and pre-fill a debrief.
-- [ ] **Replay compare.** Two flights in one scene with synced charts, aligned at take-off (as `pages/Compare.tsx` does) or at a chosen event.
-- [ ] **Real-log validation.** Replay the real ArduPlane crash logs and a few public PX4 logs; check the crash moment, attitude and path by eye; record the results in `docs/real-log-results.md`.
+- [x] **Incident mode.** From a `flight.crash` or Problem finding: open the replay 60 s before, list the finding's `related` causes in time order (built by `engine._link_causes`), loop the critical window, and pre-fill a debrief.
+- [x] **Replay compare.** Two flights in one scene with synced charts, aligned at take-off (as `pages/Compare.tsx` does) or at a chosen event.
+- [x] **Real-log validation.** Replay the real ArduPlane crash logs and a few public PX4 logs; check the crash moment, attitude and path by eye; record the results in `docs/real-log-results.md`.
 
 **Gate 1.4:**
 
-- [ ] incident mode opens 60 s before the crash or problem and lists the related causes in order
-- [ ] two flights replay together, aligned at take-off or a chosen event
-- [ ] validated on the real crash logs and documented; tag `v1.4.0`
+- [x] incident mode opens 60 s before the crash or problem and lists the related causes in order
+- [x] two flights replay together, aligned at take-off or a chosen event
+- [x] validated on the real crash logs and documented
+- [ ] tag: part of the final release (below)
+
+### Final release and deployment
+
+Decided 2026-11-25: 1.2, 1.3 and 1.4 ship **together**, as one release, after
+the 1.4 gate. Each release's branch is still merged into `main` when it is
+done (1.3 stays local and 1.4 builds on it), but nothing is tagged until then.
+
+- [ ] **Version and changelog.** One version (1.4.0) whose changelog entry
+  folds in the unreleased 1.2, 1.3 and 1.4 sections; README and docs current;
+  `docs/validation.md` regenerated.
+- [ ] **Release gate.** CI green on `main` (all jobs, including e2e and
+  Docker); full suite; benchmark; `flightlens validate private-logs` (92 of 92).
+- [ ] **Tag and publish.** Tag `v1.4.0`; the release workflow publishes PyPI,
+  the GHCR image (`latest`) and the GitHub release; the docs site deploys from
+  `main`. Check each one live.
+- [ ] **Public demo on Vercel (read-only).** The demo flights, analyzed at
+  build time, served read-only: replay, video-free reports, charts, debrief
+  report; no uploads. FlightLens's background workers and its SQLite library
+  on disk do not fit Vercel's serverless functions, so the demo is read-only
+  by design. First a spike: whether the API fits a Vercel Python function
+  (250 MB limit; pyarrow and numpy are most of it) with the library copied
+  to `/tmp` at cold start; if not, a static export of the demo's API answers
+  served next to the built UI. Needs the user's Vercel account and their go
+  ahead to deploy.
+- [ ] **Full app on a container host.** The GHCR image with a persistent
+  volume for `/data` on a host that runs containers (Fly.io, Render, Railway,
+  or the user's own server; the user picks), `FLIGHTLENS_ALLOWED_HOSTS` set to
+  its domain, HTTPS from the host. FlightLens has no login: a public instance
+  must sit behind the host's access control or a reverse proxy with
+  authentication (see `SECURITY.md`). Needs the user's account and go-ahead.
+- [ ] **Docs.** A deployment page (`docs/deploy.md`): demo, Docker host,
+  configuration, backups on the host.
 
 ### Later (not scheduled)
 
@@ -352,6 +386,18 @@ video offset, so they get the most tests.
   (gzip-compressed float32 columns, decoded with `Float32Array`) next to the
   JSON metadata at `/replay`: columnar JSON would be several times the 5 MB
   budget for a 1-hour flight; the binary table is about 3 MB.
+- 2026-11-25 (1.4 build): each flight in the two-flight replay is drawn from
+  its own take-off point (different fields overlay), aligned in time at
+  take-off, arming, log start, or a mode change or event chosen per flight.
+  Incident mode loops 15 s before to 5 s after the finding.
+- 2026-11-25: one final release after 1.4 instead of one per release; a
+  read-only public demo on Vercel plus the full app from the Docker image on
+  a container host (section 5, Final release and deployment).
+- 2026-11-25 (1.3 build): a range note is written for the looped range (the
+  timeline's shift-drag already selects the loop), not by a second
+  shift-drag. Notes store the camera mode; view snapshots (PNG) were left
+  out: the report's server-side track shows where each note is. The
+  report shares its CSS with the health report (`_report_style.css`).
 - 2026-11-24 (1.2 build): the Docker image does **not** get FFmpeg: on
   Debian slim it adds about 300 MB for metadata only. Without it the MP4
   header still gives duration, size and creation time, and the browser

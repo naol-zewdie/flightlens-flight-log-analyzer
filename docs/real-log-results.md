@@ -95,6 +95,26 @@ These are labels from the owner's account and the data, not an independent
 investigation. They are kept as regression tests (`tests/test_real_logs.py` with
 labels in the gitignored `private-logs/`).
 
+### Replay of the six crashes (1.4)
+
+The replay of every crash FlightLens found in these logs, checked by eye in
+incident mode (chase, top and cockpit views) and against the replay table at
+the crash window (3 s before to 1 s after):
+
+| Log | Crash | Replay at the crash | Linked causes |
+|---|---|---|---|
+| 089 | 08:10, in the air | from 20.8 m to 6 m, rolls to 178° (inverted), pitch to −52°; 3 s before: 32° right bank at 13.6 m, 24 m/s, Stabilize | 7 (battery sag, estimator height, bank past the 45° limit, aileron at full travel; out of trim, roll and pitch rate loops) |
+| 071 | 08:51, in the air | from 7.4 m, rolls to 119°, pitch to −46° | 3 |
+| 105 | 01:01, in the air | from 5.5 m to 3.8 m, rolls to 69° | 3 |
+| 035 | 11:48, on the runway | at 1 m, rolls to 102°: a ground loop or cartwheel | 6 |
+| 032 | 00:57, on the runway | an impact at 0.2 m with 26° of roll | 1 |
+| 039 | 25:04, on the runway | an impact at 0.4 m with 28° of roll | 1 |
+
+In every crash window the attitude data is continuous (no gap over 1 s) and
+the replay's path, height and attitude agree with the crash finding's own
+account; the three airborne crashes show the bank to one side the owner
+describes. The replay adds nothing to the verdicts: it shows them.
+
 ## PX4 SITL: 8 attempted flights that never flew
 
 PX4 v1.17 SITL sessions where the owner tried to fly normally. Before: 5

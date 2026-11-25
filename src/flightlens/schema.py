@@ -157,6 +157,35 @@ def _v6_videos(db: sqlite3.Connection, data: Path) -> None:
     db.execute("CREATE INDEX IF NOT EXISTS videos_flight ON videos(flight_id)")
 
 
+def _v7_notes_and_debriefs(db: sqlite3.Connection, data: Path) -> None:
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS notes (
+            id          TEXT PRIMARY KEY,
+            flight_id   TEXT NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
+            t_start     REAL NOT NULL,
+            t_end       REAL,
+            text        TEXT NOT NULL,
+            tags        TEXT,             -- JSON list
+            view        TEXT,             -- JSON: camera mode, restored on click
+            author      TEXT,
+            created_at  REAL NOT NULL,
+            updated_at  REAL NOT NULL
+        )"""
+    )
+    db.execute("CREATE INDEX IF NOT EXISTS notes_flight ON notes(flight_id, t_start)")
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS debriefs (
+            flight_id   TEXT PRIMARY KEY REFERENCES flights(id) ON DELETE CASCADE,
+            status      TEXT NOT NULL,    -- open | closed
+            summary     TEXT,
+            conclusion  TEXT,
+            actions     TEXT,             -- JSON list
+            author      TEXT,
+            updated_at  REAL NOT NULL
+        )"""
+    )
+
+
 Migration = Callable[[sqlite3.Connection, Path], None]
 MIGRATIONS: tuple[tuple[int, str, Migration], ...] = (
     (1, "flights and analysis jobs", _v1_flights_and_jobs),
@@ -165,6 +194,7 @@ MIGRATIONS: tuple[tuple[int, str, Migration], ...] = (
     (4, "engineer reviews and analysis versions", _v4_reviews_and_analysis_versions),
     (5, "job attempts, so interrupted jobs resume", _v5_job_attempts),
     (6, "videos attached to flights", _v6_videos),
+    (7, "notes and debriefs", _v7_notes_and_debriefs),
 )
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 

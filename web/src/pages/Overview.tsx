@@ -100,6 +100,16 @@ export function Overview() {
                           onClick={(e) => e.stopPropagation()} title="Open the replay 5 s before this finding">
                           Replay from here
                         </Link>
+                        {(f.check_id === "flight.crash" || f.severity === "problem") && f.key && (
+                          <>
+                            {" · "}
+                            <Link className="replay-link" to={`/flights/${flight.id}/replay?incident=${encodeURIComponent(f.key)}`}
+                              onClick={(e) => e.stopPropagation()}
+                              title="Incident mode: the replay from a minute before, the likely causes in order, the critical moments looped">
+                              Investigate
+                            </Link>
+                          </>
+                        )}
                       </>
                     )}
                     {f.measured != null && (

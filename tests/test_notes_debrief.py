@@ -155,3 +155,52 @@ def test_prune_keeps_annotated_and_debriefed_flights(library: Path, tmp_path: Pa
     store.put_debrief(rows[PICK[1]], {"status": "closed"})
     assert retention.candidates(store, 1, now=future) == []
     assert len(retention.candidates(store, 1, keep_reviewed=False, now=future)) == 2
+
+
+def test_debrief_report(client: TestClient) -> None:
+    from .test_videos import tiny_mp4
+
+    fid = ids(client)[PICK[1]]
+    r = client.get(f"/api/flights/{fid}/debrief.html")
+    assert r.status_code == 200 and "No debrief yet" in r.text
+    assert "default-src 'none'" in r.headers["content-security-policy"]
+
+    client.post(
+        f"/api/flights/{fid}/notes",
+        json={"t_start": 75, "text": "GPS <drops> here", "tags": ["sensor"]},
+    )
+    client.post(f"/api/flights/{fid}/notes", json={"t_start": 90, "t_end": 100, "text": "recovers"})
+    client.put(f"/api/flights/{fid}/debrief", json={
+        "status": "closed", "summary": "Lost GPS in loiter.", "conclusion": "Antenna shadowed.",
+        "actions": ["Move the GPS mast"], "author": "Naol"})  # fmt: skip
+    finding = next(
+        f
+        for f in client.get(f"/api/flights/{fid}/findings").json()["findings"]
+        if f["check_id"] == "gps.quality"
+    )
+    client.put(
+        f"/api/flights/{fid}/reviews/{finding['key']}",
+        json={"status": "confirmed", "note": "seen on video"},
+    )
+    video = client.post(
+        f"/api/flights/{fid}/videos", files={"file": ("cam.mp4", tiny_mp4())}
+    ).json()["video"]
+    client.patch(f"/api/videos/{video['id']}", json={"offset_s": 3.5, "sync_method": "manual"})
+
+    html = client.get(f"/api/flights/{fid}/debrief.html").text
+    assert (
+        "Debrief closed" in html and "Lost GPS in loiter." in html and "Antenna shadowed." in html
+    )
+    assert "<li>Move the GPS mast</li>" in html and "By Naol" in html
+    assert "GPS &lt;drops&gt; here" in html and "<drops>" not in html  # escaped
+    assert "Note 1" in html and "Note 2" in html and "Review: Confirmed · seen on video" in html
+    assert (
+        '<svg class="track"' in html and html.count('class="note"') == 2
+    )  # both notes on the track
+    assert video["sha256"] in html and "set by hand" in html and "offset 3.50 s" in html
+    track = html[html.index('<svg class="track"') : html.index("</svg>")]
+    assert " px" not in track and "N ↑" in track and ' m</text>' in track  # a metre scale bar
+    # notes, findings and modes in time order
+    assert html.index("GPS &lt;drops&gt; here") < html.index("recovers")
+    download = client.get(f"/api/flights/{fid}/debrief.html?download=1")
+    assert ".debrief.html" in download.headers["content-disposition"]

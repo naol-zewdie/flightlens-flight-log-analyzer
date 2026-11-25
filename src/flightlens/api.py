@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 
 from flightlens import __version__, fleet, media, parsers
 from flightlens.checks import all_checks
+from flightlens.debrief import render_debrief
 from flightlens.htmlreport import render_html
 from flightlens.lttb import lttb, with_gaps
 from flightlens.metrics import METRICS
@@ -1003,6 +1004,34 @@ def create_app(
                 Path(row["filename"]).stem + ".report.html"
             )
         return HTMLResponse(html, headers=headers)
+
+    @app.get("/api/flights/{flight_id}/debrief.html")
+    def debrief_html(flight_id: str, download: bool = False) -> HTMLResponse:
+        """The printable debrief report: debrief, timeline with notes, track, provenance."""
+        report = report_or_409(flight_id)
+        row = flight_or_404(flight_id)
+        html_text = render_debrief(
+            report,
+            filename=row["filename"],
+            aircraft=row.get("aircraft"),
+            debrief=store.get_debrief(flight_id),
+            notes=store.list_notes(flight_id),
+            reviews=store.reviews_for(flight_id),
+            videos=store.list_videos(flight_id),
+            replay_cols=store.read_replay_table(flight_id),
+            replay_meta=store.read_replay_meta(flight_id),
+        )
+        headers = {
+            # like the health report: nothing fetched, no script but the print button
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; "
+            "script-src 'unsafe-inline'; img-src data:",
+            "X-Content-Type-Options": "nosniff",
+        }
+        if download:
+            headers["Content-Disposition"] = _attachment(
+                Path(row["filename"]).stem + ".debrief.html"
+            )
+        return HTMLResponse(html_text, headers=headers)
 
     @app.get("/api/flights/{flight_id}/original")
     def original(flight_id: str) -> FileResponse:

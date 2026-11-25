@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="FlightLens {{ version }}">
+<title>{{ filename }} · FlightLens debrief</title>
+<style>
+{% include "_report_style.css" %}
+.status { display: inline-block; padding: 3px 10px; border-radius: 999px; font-weight: 600; font-size: 13px; }
+.status.closed { background: var(--ok-tint); color: var(--ok); }
+.status.open { background: var(--attention-tint); color: var(--attention); }
+.text { white-space: pre-wrap; margin: 4px 0 0; }
+.actions { margin: 6px 0 0; padding-left: 20px; }
+.tl td.t { white-space: nowrap; width: 1%; }
+.tl td.k { white-space: nowrap; width: 1%; color: var(--text-3); font-size: 12px; }
+.tl tr.mode td { color: var(--text-3); }
+.tl tr.finding.problem .k { color: var(--problem); font-weight: 600; }
+.tl tr.finding.attention .k { color: var(--attention); font-weight: 600; }
+.tl tr.note .k { color: var(--accent); font-weight: 600; }
+.tl .sub { color: var(--text-3); font-size: 12px; }
+.tag { font-size: 11px; padding: 1px 6px; border-radius: 999px; background: var(--neutral-tint); color: var(--text-2); margin-left: 4px; }
+.track { width: 100%; height: auto; display: block; margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; }
+.track .ground { fill: var(--surface); }
+.track .trk { fill: none; stroke: var(--text-3); stroke-width: 1.5; stroke-linejoin: round; }
+.track .win { fill: none; stroke-width: 4; stroke-linecap: round; opacity: 0.85; }
+.track .win.problem { stroke: var(--problem); }
+.track .win.attention { stroke: var(--attention); }
+.track .home { fill: none; stroke: var(--text); stroke-width: 2.5; }
+.track .note circle { fill: var(--accent); }
+.track .note text { fill: #fff; font: 600 10px var(--font); text-anchor: middle; }
+.track .lbl { fill: var(--text-3); font: 11px var(--font); }
+.track .bar { stroke: var(--text-2); stroke-width: 2; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div style="min-width: 0">
+      <div class="eyebrow">FlightLens debrief</div>
+      <h1>{{ filename }}</h1>
+      <div class="meta">
+        {% if aircraft %}<span>{{ aircraft }}</span>{% endif %}
+        {% if source.vehicle_type %}<span>{{ source.vehicle_type }}</span>{% endif %}
+        {% if source.firmware %}<span>{{ source.firmware }}</span>{% endif %}
+        {% if source.start_time %}<span>{{ source.start_time[:16].replace("T", " ") }} UTC</span>{% endif %}
+      </div>
+    </div>
+    <div class="verdict">
+      {% if debrief %}
+      <span class="status {{ debrief.status }}">{{ "Debrief closed" if debrief.status == "closed" else "Debrief open" }}</span>
+      {% else %}
+      <span class="status open">No debrief yet</span>
+      {% endif %}
+      <div class="score">Automatic verdict: <b>{{ verdict_label }}</b>{% if r.score is not none %} · health score <span class="num">{{ r.score }}</span>/100{% endif %}</div>
+    </div>
+  </header>
+
+  <div class="stats">
+    <div><div class="k">Time in the air</div><div class="v num">{{ summary.airborne_s | duration if summary.sorties else "—" }}</div></div>
+    <div><div class="k">Distance</div><div class="v num">{% if summary.distance_m is not none %}{{ summary.distance_m | num }} m{% else %}—{% endif %}</div></div>
+    <div><div class="k">Max altitude</div><div class="v num">{% if summary.max_altitude_m is not none %}{{ summary.max_altitude_m | num }} m{% else %}—{% endif %}</div></div>
+    <div><div class="k">Max speed</div><div class="v num">{% if summary.max_speed_m_s is not none %}{{ summary.max_speed_m_s | num }} m/s{% else %}—{% endif %}</div></div>
+    <div><div class="k">Battery used</div><div class="v num">{% if summary.battery_used_mah is not none %}{{ summary.battery_used_mah | num }} mAh{% else %}—{% endif %}</div></div>
+  </div>
+
+  <h2>Debrief</h2>
+  {% if debrief %}
+    {% if debrief.summary %}<div class="eyebrow">Summary</div><p class="text">{{ debrief.summary }}</p>{% endif %}
+    {% if debrief.conclusion %}<div class="eyebrow" style="margin-top: 12px">Conclusion</div><p class="text">{{ debrief.conclusion }}</p>{% endif %}
+    {% if debrief.actions %}
+    <div class="eyebrow" style="margin-top: 12px">Actions</div>
+    <ol class="actions">{% for a in debrief.actions %}<li>{{ a }}</li>{% endfor %}</ol>
+    {% endif %}
+    {% if not (debrief.summary or debrief.conclusion or debrief.actions) %}<p class="muted">The debrief has no text yet.</p>{% endif %}
+    <p class="faint" style="font-size: 12px">{% if debrief.author %}By {{ debrief.author }} · {% endif %}last saved {{ saved_at }}</p>
+  {% else %}
+    <p class="muted">No debrief has been written for this flight. The timeline below lists what FlightLens found and any notes from the replay.</p>
+  {% endif %}
+
+  {% if standing %}
+  <h2>Throughout the flight</h2>
+  <table class="tl"><tbody>
+    {% for f in standing %}
+    <tr class="finding {{ f.severity }}"><td class="k">{{ "Problem" if f.severity == "problem" else "Attention" }}</td><td>{{ f.title }}{% if f.review %} <span class="sub">· {{ f.review }}</span>{% endif %}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% endif %}
+
+  <h2>Timeline <span class="faint num">· {{ items | length }}</span></h2>
+  {% if items %}
+  <table class="tl">
+    <thead><tr><th>Time</th><th>What</th><th></th></tr></thead>
+    <tbody>
+    {% for it in items %}
+      <tr class="{{ it.kind }} {{ it.severity or '' }}">
+        <td class="t num">{{ window(it.t, it.end) if it.end is defined else (it.t | time) }}</td>
+        <td class="k">{% if it.kind == "note" %}Note {{ it.number }}{% elif it.kind == "finding" %}{{ "Problem" if it.severity == "problem" else "Attention" }}{% elif it.kind == "mode" %}Mode{% else %}Event{% endif %}</td>
+        <td>
+          <span class="text" style="margin: 0">{{ it.label }}</span>
+          {% for t in it.tags or [] %}<span class="tag">{{ t }}</span>{% endfor %}
+          {% if it.review %}<div class="sub">Review: {{ it.review }}{% if it.review_note %} · {{ it.review_note }}{% endif %}</div>{% endif %}
+          {% if it.author %}<div class="sub">{{ it.author }}</div>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Nothing to list.</p>
+  {% endif %}
+
+  <h2>Track</h2>
+  {% if track %}
+  {{ track | safe }}
+  <p class="faint" style="font-size: 12px">Seen from above, north up, in metres from the take-off point (circle). Numbers are notes; coloured stretches are findings.</p>
+  {% else %}
+  <p class="muted">This log has no position, so there is no track to draw.</p>
+  {% endif %}
+
+  <h2>Provenance</h2>
+  <dl>
+    <dt>Log file</dt><dd>{{ filename }}</dd>
+    <dt>SHA-256</dt><dd class="mono">{{ source.sha256 or "—" }}</dd>
+    <dt>Signal mapping</dt><dd class="mono">{{ source.mapping_version or "—" }}</dd>
+    <dt>Analysis</dt><dd class="mono">FlightLens {{ r.flightlens_version }}</dd>
+    {% for v in videos %}
+    <dt>Video</dt>
+    <dd>{{ v.label or v.filename }} <span class="mono faint">{{ v.sha256 }}</span><br>
+      <span class="faint">synced: {{ v.sync_label }}{% if v.offset_s is not none %} (offset {{ v.offset_s | num }} s{% if v.rate != 1 %}, rate {{ "%.5f" | format(v.rate) }}{% endif %}){% endif %}{% if v.sync_points %}, {{ v.sync_points | length }} point{{ "s" if v.sync_points | length != 1 }}{% endif %}</span></dd>
+    {% endfor %}
+    <dt>Debrief report</dt><dd>FlightLens {{ version }}, {{ generated }}</dd>
+  </dl>
+
+  <footer>
+    The debrief and notes are the engineers' own; the timeline's findings and verdict are FlightLens's automatic analysis.
+    The original log and videos are unchanged; their SHA-256 identify them.
+  </footer>
+</main>
+<button class="print" type="button" onclick="window.print()">Print / Save as PDF</button>
+</body>
+</html>

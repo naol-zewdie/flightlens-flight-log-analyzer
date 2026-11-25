@@ -1,7 +1,7 @@
 # Notes and debrief
 
-!!! note "New in FlightLens 1.3"
-    Part of the [Replay & Debrief integration plan](replay/integration-plan.md), release 1.3.
+!!! note "New in FlightLens 1.4"
+    Part of the [Replay & Debrief integration plan](replay/integration-plan.md) (built as release 1.3, published in 1.4.0).
 
 FlightLens finds problems automatically; a debrief is what the engineers
 conclude about them. While replaying a flight you write **notes** at the

@@ -174,7 +174,7 @@ frontend tasks.
 - [x] video follows play, pause, rate and scrubbing; coverage bar
 - [x] backup and restore with and without videos (the Docker image does not get `ffprobe`: see the change log)
 - [x] generated-video sync within 100 ms; full suite and real-log validation pass
-- [ ] tag `v1.2.0`
+- [x] tag: folded into the 1.4.0 release (below)
 
 ### 1.3 Debrief (branch `feature/debrief`)
 
@@ -192,7 +192,7 @@ frontend tasks.
 - [x] debrief summary and status; Library badge and filter; prune keeps debriefed flights
 - [x] `debrief.html` prints with provenance; read-only mode blocks every note and debrief edit
 - [x] full suite and real-log validation pass
-- [ ] tag `v1.3.0`
+- [x] tag: folded into the 1.4.0 release (below)
 
 ### 1.4 Incident mode and compare (branch `feature/incident`)
 
@@ -213,10 +213,10 @@ Decided 2026-11-25: 1.2, 1.3 and 1.4 ship **together**, as one release, after
 the 1.4 gate. Each release's branch is still merged into `main` when it is
 done (1.3 stays local and 1.4 builds on it), but nothing is tagged until then.
 
-- [ ] **Version and changelog.** One version (1.4.0) whose changelog entry
+- [x] **Version and changelog.** One version (1.4.0) whose changelog entry
   folds in the unreleased 1.2, 1.3 and 1.4 sections; README and docs current;
   `docs/validation.md` regenerated.
-- [ ] **Release gate.** CI green on `main` (all jobs, including e2e and
+- [x] **Release gate.** CI green on `main` (all jobs, including e2e and
   Docker); full suite; benchmark; `flightlens validate private-logs` (92 of 92).
 - [ ] **Tag and publish.** Tag `v1.4.0`; the release workflow publishes PyPI,
   the GHCR image (`latest`) and the GitHub release; the docs site deploys from
@@ -417,3 +417,7 @@ video offset, so they get the most tests.
 - 2026-11-23: SITL is no longer required. Known-outcome checks use a
   generated known-manoeuvre flight (exact ground truth) and a generated sync
   video; SITL stays as optional extra validation.
+- 2026-11-25 (final release): 1.2, 1.3 and 1.4 are published as one
+  version, 1.4.0; the v1.2.0 and v1.3.0 tags are not made. Gate on `main` at
+  `f1f1413`: CI green on every job; locally 92 of 92 private logs, 54 of 54
+  benchmark logs, all browser tests.

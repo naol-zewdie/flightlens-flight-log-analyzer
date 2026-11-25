@@ -6,37 +6,13 @@ All notable changes to FlightLens. The format follows
 `flightlens checks` and stored in every report) changes whenever its logic or
 thresholds do.
 
-## [1.4.0] - unreleased
+## [1.4.0] - 2026-11-25
 
-### Added
-- **Incident mode**: "Investigate" on a crash or Problem finding opens the
-  replay a minute before it, loops the critical window (15 s before to 5 s
-  after) and lists the likely causes FlightLens linked to it in time order;
-  "Start a debrief" pre-fills the debrief with the incident and its causes.
-- **Replay two flights** (`/compare/replay`, "Replay both in 3D" on the
-  Compare page): both flights in one 3D scene on one clock, each from its own
-  take-off point, aligned at take-off, arming, the log start or a chosen mode
-  change or event; a side-by-side readout and synced charts.
-- The replays of the six crashes in the real ArduPlane logs were checked by
-  eye and against the replay data (`docs/real-log-results.md`).
-
-## [1.3.0] - unreleased
-
-### Added
-- **Notes and debrief** (`docs/debrief.md`): press N in the replay to write a
-  note at that moment (or for the looped range), with tags; notes restore the
-  camera view and show on the timeline and the 3D path. A Debrief tab per
-  flight: open/closed, summary, conclusion, actions, with the notes and the
-  reviewed findings beside it. Library badges and a debrief filter; a debrief
-  column on the Aircraft page.
-- **Debrief report** (`/api/flights/{id}/debrief.html`): facts and verdict,
-  the debrief, one timeline of modes, events, findings with their review and
-  notes, a track with notes and findings on it, and provenance including
-  each video's SHA-256 and sync method. Prints to PDF.
-- Notes and debriefs API; database schema 7; prune keeps flights with notes
-  or a debrief.
-
-## [1.2.0] - unreleased
+Completes the Replay & Debrief integration
+([plan](https://github.com/naol-zewdie/flightlens-flight-log-analyzer/blob/main/docs/replay/integration-plan.md)):
+flight video synced to the replay, notes and a printable debrief, incident
+mode, and two flights replayed together. Versions 1.2 and 1.3 were built but
+never published; their changes are part of this release.
 
 ### Added
 - **Video** in the Replay tab (`docs/replay.md`): attach MP4 or WebM videos
@@ -47,10 +23,33 @@ thresholds do.
   corrected over 0.1 s; the timeline shows the part of the flight with video.
 - `POST/GET /api/flights/{id}/videos`, `GET /api/videos/{id}/file` (HTTP
   Range), `PATCH`, `DELETE`; database schema 6.
-- Backups include videos (format 2; `--no-video` leaves them out); prune
-  counts their size.
-- Validated with a generated video (offset 12.3 s, camera clock 0.1% fast):
-  after a two-point sync an unmarked flash shows exactly inside its 0.2 s.
+- **Notes and debrief** (`docs/debrief.md`): press N in the replay to write a
+  note at that moment (or for the looped range), with tags; notes restore the
+  camera view and show on the timeline and the 3D path. A Debrief tab per
+  flight: open/closed, summary, conclusion, actions, with the notes and the
+  reviewed findings beside it. Library badges and a debrief filter; a debrief
+  column on the Aircraft page.
+- **Debrief report** (`/api/flights/{id}/debrief.html`): facts and verdict,
+  the debrief, one timeline of modes, events, findings with their review and
+  notes, a track with notes and findings on it, and provenance including
+  each video's SHA-256 and sync method. Prints to PDF.
+- Notes and debriefs API; database schema 7.
+- **Incident mode**: "Investigate" on a crash or Problem finding opens the
+  replay a minute before it, loops the critical window (15 s before to 5 s
+  after) and lists the likely causes FlightLens linked to it in time order;
+  "Start a debrief" pre-fills the debrief with the incident and its causes.
+- **Replay two flights** (`/compare/replay`, "Replay both in 3D" on the
+  Compare page): both flights in one 3D scene on one clock, each from its own
+  take-off point, aligned at take-off, arming, the log start or a chosen mode
+  change or event; a side-by-side readout and synced charts.
+
+### Changed
+- Backups include videos, notes and debriefs (format 2; `--no-video` leaves
+  videos out). Backups made by 1.1 still restore.
+- `flightlens prune` counts video size and keeps flights with notes or a
+  debrief, as it keeps reviewed flights.
+- The database is upgraded from schema 5 to 7 on first start, with a safety
+  copy written first.
 
 ### Fixed
 - The replay's time readout rounded up to the next second (40.7 s showed
@@ -58,6 +57,14 @@ thresholds do.
 - On a busy machine the replay played slower than real time: frame gaps over
   1 s were dropped as if the tab were hidden. A hidden tab is now detected
   directly (Page Visibility API).
+
+### Validation
+- Video sync checked with a generated video (offset 12.3 s, camera clock 0.1%
+  fast): after a two-point sync an unmarked flash shows exactly inside its
+  0.2 s.
+- The replays of the six crashes in the real ArduPlane logs were checked by
+  eye and against the replay data (`docs/real-log-results.md`).
+- The schema 5 to 7 upgrade checked on a copy of a real library.
 
 ## [1.1.0] - 2026-11-24
 

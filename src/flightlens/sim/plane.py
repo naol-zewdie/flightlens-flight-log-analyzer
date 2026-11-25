@@ -16,6 +16,9 @@ BOOT = 30_000_000
 HOME = (-35.0, 149.0)
 # GPS time of the log start: 2026-03-08 09:00:00 UTC (+18 leap seconds)
 GPS_WEEK, GPS_MS0 = 2409, 32_418_000
+TURN_RATE = 6.0  # °/s, the circuit's left turns
+LEG_S = 12.0  # each straight leg (240 m at 20 m/s)
+CIRCUIT_S = LEG_S + 90.0 / TURN_RATE  # a leg, then a 90° turn
 
 
 def _latlon(x: float, y: float) -> tuple[float, float]:
@@ -68,7 +71,12 @@ def plane_log(path: Path, ending: str = "smooth", trim: float = 0.0, day: int = 
         armed = t >= 5 and (ending == "crash" or t < 105)
         flying = 20 <= t < (89.5 if ending == "crash" else land)
 
-        roll, ail, impact = 1.0 * np.sin(t), trim, False
+        # a rectangular left-hand circuit from 25 s: straight legs, then 90° turns. The
+        # attitude matches the path: wings level on the ground and the straight legs, the
+        # bank a level turn at 20 m/s needs in the turns, a small wobble on top
+        turning = flying and t >= 25 and (t - 25) % CIRCUIT_S >= LEG_S
+        bank = -np.degrees(np.arctan(20.0 * np.radians(TURN_RATE) / 9.81)) if turning else 0.0
+        roll, ail, impact = bank + 1.0 * np.sin(t), trim, False
         if ending == "crash":
             if 60 <= t < 70:
                 roll = -60.0  # bank beyond the 45° limit
@@ -88,8 +96,11 @@ def plane_log(path: Path, ending: str = "smooth", trim: float = 0.0, day: int = 
             alt = 0.0
         thr = 80 if flying else (30 if armed else 0)
         w.write("STAT", TimeUS=us(t), isFlying=int(flying), Armed=int(armed))
-        w.write("ATT", TimeUS=us(t), DesRoll=0, Roll=roll, DesPitch=0, Pitch=3, DesYaw=0,
-                Yaw=(t * 3) % 360)  # fmt: skip
+        # pitch: nose up while climbing at 5 m/s and 20 m/s, a little up in level flight
+        climbing = flying and alt < 50.0
+        pitch = np.degrees(np.arctan(5.0 / 20.0)) if climbing else (3.0 if flying else 0.0)
+        w.write("ATT", TimeUS=us(t), DesRoll=0, Roll=roll, DesPitch=0, Pitch=pitch, DesYaw=0,
+                Yaw=heading)  # fmt: skip
         w.write("AETR", TimeUS=us(t), Ail=round(ail * 4500), Elev=0, Thr=thr)
         v = 90.0 if impact else 6.0
         if impact:
@@ -100,8 +111,8 @@ def plane_log(path: Path, ending: str = "smooth", trim: float = 0.0, day: int = 
         # ground track: take-off roll east from 15 s, then a left-hand circuit
         on_ground = t < 15 or (alt == 0.0 and not flying and t > 20)
         speed = 0.0 if on_ground else min(20.0, (t - 15) * 4) if t < 20 else 20.0
-        if flying and t >= 25:
-            heading = (heading - 6.0 * 0.1) % 360  # 6°/s turn: a circuit of about 400 m
+        if turning:
+            heading = (heading - TURN_RATE * 0.1) % 360
         x += speed * 0.1 * np.sin(np.radians(heading))
         y += speed * 0.1 * np.cos(np.radians(heading))
         lat, lng = _latlon(x, y)

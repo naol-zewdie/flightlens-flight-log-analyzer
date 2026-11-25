@@ -6,6 +6,27 @@ All notable changes to FlightLens. The format follows
 `flightlens checks` and stored in every report) changes whenever its logic or
 thresholds do.
 
+## [Unreleased]
+
+### Fixed
+- The demo planes flew sideways in the 3D replay: their generated logs recorded
+  a heading that slowly rotated whatever the plane did. They now log the heading
+  of their track, bank into their turns and pitch up in the climb, and fly a
+  rectangular circuit with straight legs.
+- Before a log's first attitude sample, a stationary aircraft was drawn facing
+  north; it now faces where it first points.
+- The Vercel demo's health said "degraded" (the free-space check guards uploads,
+  which a read-only demo never takes).
+
+### Changed
+- New 3D aircraft models: a streamlined plane with tapered wings, dihedral,
+  tailplane, fin and a turning propeller; multirotors with round arms, motors,
+  turning two-blade props, a canopy and skids. Navigation lights (red left,
+  green right, white tail) and a multirotor's front arms in the accent colour
+  show which way it points.
+- The chase camera swings round behind the aircraft through turns like a chase
+  plane instead of being locked to the heading.
+
 ## [1.4.0] - 2026-11-25
 
 Completes the Replay & Debrief integration

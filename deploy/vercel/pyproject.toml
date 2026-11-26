@@ -1,0 +1,14 @@
+# The FlightLens read-only public demo on Vercel. Set the Vercel project's
+# Root Directory to deploy/vercel. It runs the released package from PyPI (which
+# includes the web UI); bump the pin with each release. See docs/deploy.md.
+[project]
+name = "flightlens-demo"
+version = "1.4.0"
+requires-python = ">=3.12,<3.13"
+dependencies = ["flightlens==1.4.0"]
+
+[tool.vercel]
+entrypoint = "app:app"
+
+[tool.vercel.scripts]
+build = "python build.py"

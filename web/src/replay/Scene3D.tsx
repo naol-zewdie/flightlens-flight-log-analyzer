@@ -9,7 +9,8 @@ import type { Finding } from "../api";
 import type { Note } from "./notes";
 import { cssVar, useThemeVersion } from "../components/theme";
 import type { Clock } from "./clock";
-import { bodyToWorld, enuToWorld, eulerOf, stateAt, type Quat, type Replay } from "./data";
+import { buildAircraft, spinProps } from "./aircraft";
+import { bodyToWorld, enuToWorld, eulerOf, heldAt, stateAt, type Quat, type Replay } from "./data";
 
 export type CameraMode = "chase" | "orbit" | "top" | "cockpit";
 export const CAMERAS: { mode: CameraMode; label: string; key: string }[] = [
@@ -40,56 +41,7 @@ export function color(v: string, fallback: string): THREE.Color {
   return bg.lerp(fg, a);
 }
 
-/** Simple aircraft models in body axes: x forward, y right, z down (1 unit ≈ 1 m). */
-export function buildAircraft(vehicle: string | null, accent: THREE.Color, body: THREE.Color): THREE.Group {
-  const g = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color: body, roughness: 0.6, metalness: 0.1 });
-  const nose = new THREE.MeshStandardMaterial({ color: accent, roughness: 0.4 });
-  const box = (x: number, y: number, z: number, m = mat) => new THREE.Mesh(new THREE.BoxGeometry(x, y, z), m);
-  const v = (vehicle ?? "").toLowerCase();
-  const rotor = (x: number, y: number, r: number) => {
-    const disc = new THREE.Mesh(
-      new THREE.CylinderGeometry(r, r, 0.02, 24),
-      new THREE.MeshStandardMaterial({ color: body, transparent: true, opacity: 0.35 }),
-    );
-    disc.rotation.x = Math.PI / 2; // cylinder axis along body z (vertical)
-    disc.position.set(x, y, -0.08);
-    g.add(disc);
-  };
-  const fixedWing = v.includes("fixed wing") || v.includes("plane") || v.includes("vtol");
-  if (fixedWing) {
-    g.add(box(1.4, 0.16, 0.16)); // fuselage
-    const wing = box(0.3, 2.0, 0.04);
-    wing.position.set(0.1, 0, -0.02);
-    g.add(wing);
-    const tail = box(0.18, 0.7, 0.03);
-    tail.position.set(-0.62, 0, -0.02);
-    g.add(tail);
-    const fin = box(0.2, 0.03, 0.28);
-    fin.position.set(-0.62, 0, -0.16);
-    g.add(fin);
-    const tip = box(0.18, 0.17, 0.17, nose);
-    tip.position.set(0.75, 0, 0);
-    g.add(tip);
-    if (v.includes("vtol")) for (const [x, y] of [[0.45, 0.6], [0.45, -0.6], [-0.35, 0.6], [-0.35, -0.6]]) rotor(x, y, 0.22);
-  } else {
-    const arms = v.includes("octo") ? 8 : v.includes("hexa") ? 6 : 4;
-    const reach = 0.55;
-    for (let k = 0; k < arms; k++) {
-      const a = (Math.PI * 2 * k) / arms + Math.PI / arms;
-      const arm = box(reach, 0.05, 0.04);
-      arm.position.set(Math.cos(a) * reach / 2, Math.sin(a) * reach / 2, 0);
-      arm.rotation.z = a;
-      g.add(arm);
-      rotor(Math.cos(a) * reach, Math.sin(a) * reach, 0.2);
-    }
-    g.add(box(0.32, 0.22, 0.1));
-    const tip = box(0.16, 0.1, 0.08, nose); // the front, in the accent colour
-    tip.position.set(0.22, 0, 0);
-    g.add(tip);
-  }
-  return g;
-}
+export { buildAircraft };
 
 export function niceStep(raw: number): number {
   const p = 10 ** Math.floor(Math.log10(Math.max(raw, 1e-6)));
@@ -251,25 +203,60 @@ export function Scene3D({ replay, clock, findings, camera, notes = [] }: Props) 
 
     const world = new THREE.Matrix4();
     const tmp = new THREE.Vector3();
+    // the first logged attitude, kept level: where the aircraft faces before it is logged
+    const firstAttitude = ((): Quat => {
+      const k = cols.valid_att ? cols.valid_att.findIndex((v) => v > 0) : -1;
+      if (k < 0) return [1, 0, 0, 0];
+      const yaw = (eulerOf([cols.qw[k], cols.qx[k], cols.qy[k], cols.qz[k]]).yaw * Math.PI) / 180;
+      return [Math.cos(yaw / 2), 0, 0, Math.sin(yaw / 2)];
+    })();
+    // throttle as 0-1 (some logs record percent)
+    const thrustScale = (() => {
+      let max = 0;
+      for (const v of cols.thrust ?? []) if (Number.isFinite(v) && v > max) max = v;
+      return max > 1.5 ? 100 : 1;
+    })();
+    // the chase camera swings round behind the aircraft like a chase plane instead
+    // of being bolted to its heading
+    const chase = { pos: new THREE.Vector3(), ready: false };
+    const CHASE_TAU = 0.6; // s, how quickly it swings round
+    let lastTime = NaN, lastWall = 0;
     const draw = () => {
-      const s = stateAt(replay, clock.get().time);
+      const now = performance.now();
+      const wallDt = lastWall ? Math.min(0.1, (now - lastWall) / 1000) : 0;
+      lastWall = now;
+      const { time, playing } = clock.get();
+      const replayDt = Number.isFinite(lastTime) ? time - lastTime : 0;
+      lastTime = time;
+      const s = stateAt(replay, time);
       const pos = new THREE.Vector3(...enuToWorld(
         Number.isFinite(s.east) ? s.east : 0,
         Number.isFinite(s.north) ? s.north : 0,
         Number.isFinite(s.up) ? s.up : 0,
       ));
-      // attitude: logged, or level along the direction of travel when there is none
+      // attitude: logged (held through gaps), or, before the first attitude sample,
+      // level along the direction of travel, or facing where it will first point
       let q: Quat | null = s.q;
       if (!q) {
         const k = Math.round((s.t - meta.start) * meta.rate_hz);
         const ve = cols.ve?.[k], vn = cols.vn?.[k];
-        const heading = Number.isFinite(ve) && Number.isFinite(vn) && Math.hypot(ve, vn) > 0.5 ? Math.atan2(ve, vn) : 0;
-        q = [Math.cos(heading / 2), 0, 0, Math.sin(heading / 2)];
+        if (Number.isFinite(ve) && Number.isFinite(vn) && Math.hypot(ve, vn) > 0.5) {
+          const heading = Math.atan2(ve, vn);
+          q = [Math.cos(heading / 2), 0, 0, Math.sin(heading / 2)];
+        } else {
+          q = firstAttitude;
+        }
       }
       const m = bodyToWorld(q);
       world.set(m[0], m[1], m[2], 0, m[3], m[4], m[5], 0, m[6], m[7], m[8], 0, 0, 0, 0, 1);
       holder.position.copy(pos);
       holder.quaternion.setFromRotationMatrix(world);
+      // propellers turn while armed, faster with more throttle
+      const armed = heldAt(meta, cols.armed, time) > 0;
+      const thr = heldAt(meta, cols.thrust, time) / thrustScale;
+      const power = armed ? (Number.isFinite(thr) ? Math.max(0.15, thr) : 0.5) : 0;
+      if (playing && replayDt > 0 && replayDt < 1) spinProps(aircraft, power, replayDt);
+      else if (!armed) spinProps(aircraft, 0, 0);
 
       // the flown part of each run
       const idx = Math.round((s.t - meta.start) * meta.rate_hz);
@@ -289,10 +276,20 @@ export function Scene3D({ replay, clock, findings, camera, notes = [] }: Props) 
       const fwd = new THREE.Vector3(Math.sin(yaw), 0, -Math.cos(yaw)); // horizontal heading
       controls.enabled = mode === "orbit";
       holder.visible = mode !== "cockpit";
+      let settling = false;
       if (mode === "chase") {
         cam.up.set(0, 1, 0);
-        cam.position.copy(pos).addScaledVector(fwd, -7).add(tmp.set(0, 3, 0));
+        // the camera's offset from the aircraft eases round behind it (no lag in
+        // distance, however fast it flies); a seek or a mode change snaps
+        const want = tmp.copy(fwd).multiplyScalar(-7).add(new THREE.Vector3(0, 3, 0));
+        const jumped = !chase.ready || lastMode !== "chase" || Math.abs(replayDt) > 1;
+        if (jumped || wallDt === 0) chase.pos.copy(want);
+        else chase.pos.lerp(want, 1 - Math.exp(-wallDt / CHASE_TAU)).setLength(want.length());
+        chase.ready = true;
+        cam.position.copy(pos).add(chase.pos);
         cam.lookAt(pos);
+        // paused or scrubbing: keep drawing until the camera has swung round
+        settling = chase.pos.distanceTo(want) > 0.02;
       } else if (mode === "orbit") {
         if (lastMode !== "orbit") {
           cam.up.set(0, 1, 0);
@@ -325,6 +322,7 @@ export function Scene3D({ replay, clock, findings, camera, notes = [] }: Props) 
       const dist = mode === "top" ? span * 1.3 : cam.position.distanceTo(pos);
       aircraft.scale.setScalar(Math.max(1, dist / 18));
       renderer.render(scene, mode === "top" ? topCam : cam);
+      if (settling && !playing) request();
     };
 
     let pending = 0;

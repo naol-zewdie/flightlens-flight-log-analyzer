@@ -188,6 +188,30 @@ def test_known_manoeuvres_telemetry_log(manoeuvre_bin: Path, tmp_path: Path) -> 
     _check_against_truth(flight, deg=0.5, metres=0.5)
 
 
+def test_generated_plane_points_where_it_flies(tmp_path: Path) -> None:
+    """The demo planes' logged heading follows their track, and they bank into the turn
+    (they once logged a heading that just rotated, so the 3D model flew sideways)."""
+    from flightlens.sim.plane import plane_log
+
+    c = build_replay(parsers.load(plane_log(tmp_path / "plane.bin"))).columns
+    k = 25  # 1 s baseline at 25 Hz
+    de, dn = c["east"][k:] - c["east"][:-k], c["north"][k:] - c["north"][:-k]
+    speed = np.hypot(de, dn) / (c["t"][k:] - c["t"][:-k])
+    track = np.degrees(np.arctan2(de, dn))
+    mid = slice(k // 2, k // 2 + len(track))
+    moving = speed > 10
+    assert moving.sum() > 1000
+    off = (c["yaw"][mid][moving] - track[moving] + 180) % 360 - 180
+    assert np.percentile(np.abs(off), 95) < 5
+    # a left-hand circuit: banked left in the turns, wings level on the straight legs
+    turn_rate = np.gradient(np.unwrap(np.radians(c["yaw"]))) * 25
+    turning = moving & (np.degrees(turn_rate[mid]) < -4)
+    straight = moving & (np.abs(np.degrees(turn_rate[mid])) < 0.5) & (c["t"][mid] > 25)
+    assert turning.sum() > 100 and straight.sum() > 100
+    assert np.median(c["roll"][mid][turning]) < -8
+    assert np.median(np.abs(c["roll"][mid][straight])) < 2
+
+
 # --- formats and missing data ---------------------------------------------------------------
 
 
